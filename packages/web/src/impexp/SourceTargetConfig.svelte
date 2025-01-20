@@ -14,14 +14,14 @@
   import { findFileFormat, getFileFormatDirections } from '../plugins/fileformats';
   import SqlEditor from '../query/SqlEditor.svelte';
   import { currentArchive, currentDatabase, extensions } from '../stores';
-  import { useArchiveFiles, useConnectionInfo, useDatabaseInfo } from '../utility/metadataLoaders';
+  import { useConnectionInfo } from '../utility/metadataLoaders';
   import FilesInput from './FilesInput.svelte';
   import FormConnectionSelect from './FormConnectionSelect.svelte';
   import FormDatabaseSelect from './FormDatabaseSelect.svelte';
   import FormSchemaSelect from './FormSchemaSelect.svelte';
   import FormTablesSelect from './FormTablesSelect.svelte';
   import { findEngineDriver } from 'dbgate-tools';
-import AceEditor from '../query/AceEditor.svelte';
+  import AceEditor from '../query/AceEditor.svelte';
 
   export let direction;
   export let storageTypeField;
@@ -51,8 +51,6 @@ import AceEditor from '../query/AceEditor.svelte';
         ];
 
   $: storageType = $values[storageTypeField];
-  $: dbinfo = useDatabaseInfo({ conid: $values[connectionIdField], database: $values[databaseNameField] });
-  $: archiveFiles = useArchiveFiles({ folder: $values[archiveFolderField] });
   $: format = findFileFormat($extensions, storageType);
   $: connectionInfo = useConnectionInfo({ conid: $values[connectionIdField] });
   $: driver = findEngineDriver($connectionInfo, $extensions);
@@ -139,17 +137,9 @@ import AceEditor from '../query/AceEditor.svelte';
     <div class="label">Query</div>
     <div class="sqlwrap">
       {#if $values.sourceQueryType == 'json'}
-        <AceEditor
-          value={$values.sourceQuery}
-          on:input={e => setFieldValue('sourceQuery', e.detail)}
-          mode="json"
-        />
+        <AceEditor value={$values.sourceQuery} on:input={e => setFieldValue('sourceQuery', e.detail)} mode="json" />
       {:else}
-        <SqlEditor
-          value={$values.sourceQuery}
-          on:input={e => setFieldValue('sourceQuery', e.detail)}
-          {engine}
-        />
+        <SqlEditor value={$values.sourceQuery} on:input={e => setFieldValue('sourceQuery', e.detail)} {engine} />
       {/if}
     </div>
   {/if}
@@ -199,10 +189,12 @@ import AceEditor from '../query/AceEditor.svelte';
 
   .sqlwrap {
     position: relative;
+    z-index: 0;
     height: 100px;
     width: 20vw;
     margin-left: var(--dim-large-form-margin);
     margin-bottom: var(--dim-large-form-margin);
+    border: 1px solid var(--theme-border);
   }
 
   .label {

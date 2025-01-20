@@ -1,4 +1,4 @@
-module.exports = ({ editMenu }) => [
+module.exports = ({ editMenu, isMac }) => [
   {
     label: 'File',
     submenu: [
@@ -8,9 +8,10 @@ module.exports = ({ editMenu }) => [
       { command: 'new.query', hideDisabled: true },
       { command: 'new.queryDesign', hideDisabled: true },
       { command: 'new.diagram', hideDisabled: true },
-      { command: 'new.freetable', hideDisabled: true },
+      { command: 'new.perspective', hideDisabled: true },
       { command: 'new.shell', hideDisabled: true },
       { command: 'new.jsonl', hideDisabled: true },
+      { command: 'new.modelTransform', hideDisabled: true },
       { divider: true },
       { command: 'file.open', hideDisabled: true },
       { command: 'file.openArchive', hideDisabled: true },
@@ -20,22 +21,9 @@ module.exports = ({ editMenu }) => [
       { divider: true },
       { command: 'file.exit', hideDisabled: true },
       { command: 'app.logout', hideDisabled: true, skipInApp: true },
+      { command: 'app.disconnect', hideDisabled: true, skipInApp: true },
     ],
   },
-  {
-    label: 'Window',
-    submenu: [
-      { command: 'tabs.closeTab', hideDisabled: false },
-      { command: 'tabs.closeAll', hideDisabled: false },
-      { command: 'tabs.closeTabsWithCurrentDb', hideDisabled: false },
-      { command: 'tabs.closeTabsButCurrentDb', hideDisabled: false },
-      { divider: true },
-      { command: 'app.zoomIn', hideDisabled: true },
-      { command: 'app.zoomOut', hideDisabled: true },
-      { command: 'app.zoomReset', hideDisabled: true },
-    ],
-  },
-
   editMenu
     ? {
         label: 'Edit',
@@ -46,6 +34,7 @@ module.exports = ({ editMenu }) => [
           { command: 'edit.cut' },
           { command: 'edit.copy' },
           { command: 'edit.paste' },
+          { command: 'edit.selectAll' },
         ],
       }
     : null,
@@ -68,9 +57,19 @@ module.exports = ({ editMenu }) => [
       { command: 'app.toggleDevTools', hideDisabled: true },
       { command: 'app.toggleFullScreen', hideDisabled: true },
       { command: 'app.minimize', hideDisabled: true },
+      { command: 'toggle.sidebar' },
       { divider: true },
       { command: 'theme.changeTheme', hideDisabled: true },
       { command: 'settings.show' },
+      { divider: true },
+      { command: 'tabs.closeTab', hideDisabled: false },
+      { command: 'tabs.closeAll', hideDisabled: false },
+      { command: 'tabs.closeTabsWithCurrentDb', hideDisabled: false },
+      { command: 'tabs.closeTabsButCurrentDb', hideDisabled: false },
+      { divider: true },
+      { command: 'app.zoomIn', hideDisabled: true },
+      { command: 'app.zoomOut', hideDisabled: true },
+      { command: 'app.zoomReset', hideDisabled: true },
     ],
   },
   {
@@ -83,8 +82,21 @@ module.exports = ({ editMenu }) => [
       { command: 'sql.generator', hideDisabled: true },
       { command: 'file.import', hideDisabled: true },
       { command: 'new.modelCompare', hideDisabled: true },
+      { divider: true },
+      { command: 'folder.showLogs', hideDisabled: true },
+      { command: 'folder.showData', hideDisabled: true },
+      { command: 'new.gist', hideDisabled: true },
+      { command: 'app.resetSettings', hideDisabled: true },
     ],
   },
+  ...(isMac
+    ? [
+        {
+          role: 'window',
+          submenu: [{ role: 'minimize' }, { role: 'zoom' }, { type: 'separator' }, { role: 'front' }],
+        },
+      ]
+    : []),
   {
     label: 'Help',
     submenu: [
@@ -96,6 +108,8 @@ module.exports = ({ editMenu }) => [
       { command: 'settings.commands', hideDisabled: true },
       { command: 'tabs.changelog', hideDisabled: true },
       { command: 'about.show', hideDisabled: true },
+      { divider: true },
+      { command: 'file.checkForUpdates', hideDisabled: true },
     ],
   },
 ];

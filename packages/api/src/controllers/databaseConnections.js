@@ -1,4 +1,3 @@
-const uuidv1 = require('uuid/v1');
 const connections = require('./connections');
 const archive = require('./archive');
 const socket = require('../utility/socket');
@@ -12,6 +11,9 @@ const {
   matchPairedObjects,
   extendDatabaseInfo,
   modelCompareDbDiffOptions,
+  getLogger,
+  extractErrorLogData,
+  filterStructureBySchema,
 } = require('dbgate-tools');
 const { html, parse } = require('diff2html');
 const { handleProcessCommunication } = require('../utility/processComm');
@@ -27,6 +29,13 @@ const { createTwoFilesPatch } = require('diff');
 const diff2htmlPage = require('../utility/diff2htmlPage');
 const processArgs = require('../utility/processArgs');
 const { testConnectionPermission } = require('../utility/hasPermission');
+const { MissingCredentialsError } = require('../utility/exceptions');
+const pipeForkLogs = require('../utility/pipeForkLogs');
+const crypto = require('crypto');
+const loadModelTransform = require('../utility/loadModelTransform');
+const exportDbModelSql = require('../utility/exportDbModelSql');
+
+const logger = getLogger('databaseConnections');
 
 module.exports = {
   /** @type {import('dbgate-types').OpenedDatabaseConnection[]} */
@@ -42,24 +51,24 @@ module.exports = {
     const existing = this.opened.find(x => x.conid == conid && x.database == database);
     if (!existing) return;
     existing.structure = structure;
-    socket.emitChanged(`database-structure-changed-${conid}-${database}`);
+    socket.emitChanged('database-structure-changed', { conid, database });
   },
   handle_structureTime(conid, database, { analysedTime }) {
     const existing = this.opened.find(x => x.conid == conid && x.database == database);
     if (!existing) return;
     existing.analysedTime = analysedTime;
-    socket.emitChanged(`database-status-changed-${conid}-${database}`);
+    socket.emitChanged(`database-status-changed`, { conid, database });
   },
   handle_version(conid, database, { version }) {
     const existing = this.opened.find(x => x.conid == conid && x.database == database);
     if (!existing) return;
     existing.serverVersion = version;
-    socket.emitChanged(`database-server-version-changed-${conid}-${database}`);
+    socket.emitChanged(`database-server-version-changed`, { conid, database });
   },
 
   handle_error(conid, database, props) {
     const { error } = props;
-    console.log(`Error in database connection ${conid}, database ${database}: ${error}`);
+    logger.error(`Error in database connection ${conid}, database ${database}: ${error}`);
   },
   handle_response(conid, database, { msgid, ...response }) {
     const [resolve, reject] = this.requests[msgid];
@@ -72,7 +81,7 @@ module.exports = {
     if (!existing) return;
     if (existing.status && status && existing.status.counter > status.counter) return;
     existing.status = status;
-    socket.emitChanged(`database-status-changed-${conid}-${database}`);
+    socket.emitChanged(`database-status-changed`, { conid, database });
   },
 
   handle_ping() {},
@@ -81,13 +90,26 @@ module.exports = {
     const existing = this.opened.find(x => x.conid == conid && x.database == database);
     if (existing) return existing;
     const connection = await connections.getCore({ conid });
-    const subprocess = fork(global['API_PACKAGE'] || process.argv[1], [
-      '--is-forked-api',
-      '--start-process',
-      'databaseConnectionProcess',
-      ...processArgs.getPassArgs(),
-      // ...process.argv.slice(3),
-    ]);
+    if (connection.passwordMode == 'askPassword' || connection.passwordMode == 'askUser') {
+      throw new MissingCredentialsError({ conid, passwordMode: connection.passwordMode });
+    }
+    if (connection.useRedirectDbLogin) {
+      throw new MissingCredentialsError({ conid, redirectToDbLogin: true });
+    }
+    const subprocess = fork(
+      global['API_PACKAGE'] || process.argv[1],
+      [
+        '--is-forked-api',
+        '--start-process',
+        'databaseConnectionProcess',
+        ...processArgs.getPassArgs(),
+        // ...process.argv.slice(3),
+      ],
+      {
+        stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+      }
+    );
+    pipeForkLogs(subprocess);
     const lastClosed = this.closed[`${conid}/${database}`];
     const newOpened = {
       conid,
@@ -122,10 +144,15 @@ module.exports = {
 
   /** @param {import('dbgate-types').OpenedDatabaseConnection} conn */
   sendRequest(conn, message) {
-    const msgid = uuidv1();
+    const msgid = crypto.randomUUID();
     const promise = new Promise((resolve, reject) => {
       this.requests[msgid] = [resolve, reject];
-      conn.subprocess.send({ msgid, ...message });
+      try {
+        conn.subprocess.send({ msgid, ...message });
+      } catch (err) {
+        logger.error(extractErrorLogData(err), 'Error sending request do process');
+        this.close(conn.conid, conn.database);
+      }
     });
     return promise;
   },
@@ -133,7 +160,7 @@ module.exports = {
   queryData_meta: true,
   async queryData({ conid, database, sql }, req) {
     testConnectionPermission(conid, req);
-    console.log(`Processing query, conid=${conid}, database=${database}, sql=${sql}`);
+    logger.info({ conid, database, sql }, 'Processing query');
     const opened = await this.ensureOpened(conid, database);
     // if (opened && opened.status && opened.status.name == 'error') {
     //   return opened.status;
@@ -151,11 +178,20 @@ module.exports = {
   },
 
   runScript_meta: true,
-  async runScript({ conid, database, sql }, req) {
+  async runScript({ conid, database, sql, useTransaction }, req) {
     testConnectionPermission(conid, req);
-    console.log(`Processing script, conid=${conid}, database=${database}, sql=${sql}`);
+    logger.info({ conid, database, sql }, 'Processing script');
     const opened = await this.ensureOpened(conid, database);
-    const res = await this.sendRequest(opened, { msgtype: 'runScript', sql });
+    const res = await this.sendRequest(opened, { msgtype: 'runScript', sql, useTransaction });
+    return res;
+  },
+
+  runOperation_meta: true,
+  async runOperation({ conid, database, operation, useTransaction }, req) {
+    testConnectionPermission(conid, req);
+    logger.info({ conid, database, operation }, 'Processing operation');
+    const opened = await this.ensureOpened(conid, database);
+    const res = await this.sendRequest(opened, { msgtype: 'runOperation', operation, useTransaction });
     return res;
   },
 
@@ -179,6 +215,17 @@ module.exports = {
       };
     }
     return res.result || null;
+  },
+
+  schemaList_meta: true,
+  async schemaList({ conid, database }, req) {
+    testConnectionPermission(conid, req);
+    return this.loadDataCore('schemaList', { conid, database });
+  },
+
+  dispatchDatabaseChangedEvent_meta: true,
+  dispatchDatabaseChangedEvent({ event, conid, database }) {
+    socket.emitChanged(event, { conid, database });
   },
 
   loadKeys_meta: true,
@@ -272,8 +319,19 @@ module.exports = {
     let existing = this.opened.find(x => x.conid == conid && x.database == database);
 
     if (existing) {
-      existing.subprocess.send({ msgtype: 'ping' });
+      try {
+        existing.subprocess.send({ msgtype: 'ping' });
+      } catch (err) {
+        logger.error(extractErrorLogData(err), 'Error pinging DB connection');
+        this.close(conid, database);
+
+        return {
+          status: 'error',
+          message: 'Ping failed',
+        };
+      }
     } else {
+      // @ts-ignore
       existing = await this.ensureOpened(conid, database);
     }
 
@@ -294,6 +352,11 @@ module.exports = {
 
   syncModel_meta: true,
   async syncModel({ conid, database, isFullRefresh }, req) {
+    if (conid == '__model') {
+      socket.emitChanged('database-structure-changed', { conid, database });
+      return { status: 'ok' };
+    }
+
     testConnectionPermission(conid, req);
     const conn = await this.ensureOpened(conid, database);
     conn.subprocess.send({ msgtype: 'syncModel', isFullRefresh });
@@ -304,7 +367,13 @@ module.exports = {
     const existing = this.opened.find(x => x.conid == conid && x.database == database);
     if (existing) {
       existing.disconnected = true;
-      if (kill) existing.subprocess.kill();
+      if (kill) {
+        try {
+          existing.subprocess.kill();
+        } catch (err) {
+          logger.error(extractErrorLogData(err), 'Error killing subprocess');
+        }
+      }
       this.opened = this.opened.filter(x => x.conid != conid || x.database != database);
       this.closed[`${conid}/${database}`] = {
         status: {
@@ -313,7 +382,7 @@ module.exports = {
         },
         structure: existing.structure,
       };
-      socket.emitChanged(`database-status-changed-${conid}-${database}`);
+      socket.emitChanged(`database-status-changed`, { conid, database });
     }
   },
 
@@ -331,11 +400,12 @@ module.exports = {
   },
 
   structure_meta: true,
-  async structure({ conid, database }, req) {
+  async structure({ conid, database, modelTransFile = null }, req) {
     testConnectionPermission(conid, req);
     if (conid == '__model') {
       const model = await importDbModel(database);
-      return model;
+      const trans = await loadModelTransform(modelTransFile);
+      return trans ? trans(model) : model;
     }
 
     const opened = await this.ensureOpened(conid, database);
@@ -371,14 +441,35 @@ module.exports = {
   },
 
   exportModel_meta: true,
-  async exportModel({ conid, database }, req) {
+  async exportModel({ conid, database, outputFolder, schema }, req) {
     testConnectionPermission(conid, req);
-    const archiveFolder = await archive.getNewArchiveFolder({ database });
-    await fs.mkdir(path.join(archivedir(), archiveFolder));
+
+    const realFolder = outputFolder.startsWith('archive:')
+      ? resolveArchiveFolder(outputFolder.substring('archive:'.length))
+      : outputFolder;
+
     const model = await this.structure({ conid, database });
-    await exportDbModel(model, path.join(archivedir(), archiveFolder));
-    socket.emitChanged(`archive-folders-changed`);
-    return { archiveFolder };
+    const filteredModel = schema ? filterStructureBySchema(model, schema) : model;
+    await exportDbModel(extendDatabaseInfo(filteredModel), realFolder);
+
+    if (outputFolder.startsWith('archive:')) {
+      socket.emitChanged(`archive-files-changed`, { folder: outputFolder.substring('archive:'.length) });
+    }
+    return { status: 'ok' };
+  },
+
+  exportModelSql_meta: true,
+  async exportModelSql({ conid, database, outputFolder, outputFile, schema }, req) {
+    testConnectionPermission(conid, req);
+
+    const connection = await connections.getCore({ conid });
+    const driver = requireEngineDriver(connection);
+
+    const model = await this.structure({ conid, database });
+    const filteredModel = schema ? filterStructureBySchema(model, schema) : model;
+    await exportDbModelSql(extendDatabaseInfo(filteredModel), driver, outputFolder, outputFile);
+
+    return { status: 'ok' };
   },
 
   generateDeploySql_meta: true,

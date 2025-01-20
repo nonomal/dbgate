@@ -1,4 +1,7 @@
 <script lang="ts" context="module">
+  import registerCommand from '../commands/registerCommand';
+  import { copyTextToClipboard } from '../utility/clipboard';
+
   const getCurrentEditor = () => getActiveComponent('QueryTab');
 
   registerCommand({
@@ -17,6 +20,14 @@
     testEnabled: () => getCurrentEditor()?.isSqlEditor(),
     onClick: () => getCurrentEditor().insertSqlJoin(),
   });
+  registerCommand({
+    id: 'query.toggleVisibleResultTabs',
+    category: 'Query',
+    name: 'Toggle visible result tabs',
+    keyText: 'CtrlOrCommand+Shift+R',
+    testEnabled: () => !!getCurrentEditor(),
+    onClick: () => getCurrentEditor().toggleVisibleResultTabs(),
+  });
   registerFileCommands({
     idPrefix: 'query',
     category: 'Query',
@@ -29,6 +40,7 @@
     toggleComment: true,
     findReplace: true,
     executeAdditionalCondition: () => getCurrentEditor()?.hasConnection(),
+    copyPaste: true,
   });
   registerCommand({
     id: 'query.executeCurrent',
@@ -39,20 +51,20 @@
       getCurrentEditor() != null && !getCurrentEditor()?.isBusy() && getCurrentEditor()?.hasConnection(),
     onClick: () => getCurrentEditor().executeCurrent(),
   });
+
+  export const allowSwitchDatabase = props => true;
 </script>
 
 <script lang="ts">
-  import { getContext } from 'svelte';
+  import { getContext, onDestroy, onMount } from 'svelte';
   import sqlFormatter from 'sql-formatter';
-
-  import registerCommand from '../commands/registerCommand';
 
   import VerticalSplitter from '../elements/VerticalSplitter.svelte';
   import SqlEditor from '../query/SqlEditor.svelte';
   import useEditorData from '../query/useEditorData';
-  import { extensions } from '../stores';
+  import { currentEditorWrapEnabled, extensions } from '../stores';
   import applyScriptTemplate from '../utility/applyScriptTemplate';
-  import { changeTab } from '../utility/common';
+  import { changeTab, markTabUnsaved } from '../utility/common';
   import { getDatabaseInfo, useConnectionInfo } from '../utility/metadataLoaders';
   import SocketMessageView from '../query/SocketMessageView.svelte';
   import useEffect from '../utility/useEffect';
@@ -63,7 +75,7 @@
   import InsertJoinModal from '../modals/InsertJoinModal.svelte';
   import useTimerLabel from '../utility/useTimerLabel';
   import createActivator, { getActiveComponent } from '../utility/createActivator';
-  import { findEngineDriver } from 'dbgate-tools';
+  import { findEngineDriver, safeJsonParse } from 'dbgate-tools';
   import AceEditor from '../query/AceEditor.svelte';
   import StatusBarTabItem from '../widgets/StatusBarTabItem.svelte';
   import { showSnackbarError } from '../utility/snackbar';
@@ -73,6 +85,10 @@
   import ToolStripExportButton, { createQuickExportHandlerRef } from '../buttons/ToolStripExportButton.svelte';
   import ToolStripSaveButton from '../buttons/ToolStripSaveButton.svelte';
   import ToolStripCommandSplitButton from '../buttons/ToolStripCommandSplitButton.svelte';
+  import { getClipboardText } from '../utility/clipboard';
+  import ToolStripDropDownButton from '../buttons/ToolStripDropDownButton.svelte';
+  import { extractQueryParameters, replaceQueryParameters } from 'dbgate-query-splitter';
+  import QueryParametersModal from '../modals/QueryParametersModal.svelte';
 
   export let tabid;
   export let conid;
@@ -81,19 +97,64 @@
 
   export const activator = createActivator('QueryTab', false);
 
-  const tabVisible: any = getContext('tabVisible');
+  const QUERY_PARAMETER_STYLES = [
+    {
+      value: '',
+      text: '(no parameters)',
+    },
+    {
+      value: '?',
+      text: '? (positional)',
+    },
+    {
+      value: '@',
+      text: '@variable',
+    },
+    {
+      value: ':',
+      text: ':variable',
+    },
+    {
+      value: '$',
+      text: '$variable',
+    },
+    {
+      value: '#',
+      text: '#variable',
+    },
+  ];
+
+  const tabFocused: any = getContext('tabFocused');
   const timerLabel = useTimerLabel();
 
   let busy = false;
   let executeNumber = 0;
+  let executeStartLine = 0;
   let visibleResultTabs = false;
   let sessionId = null;
   let resultCount;
-
+  let errorMessages;
   let domEditor;
+  let domToolStrip;
+  let intervalId;
+
+  onMount(() => {
+    intervalId = setInterval(() => {
+      if (sessionId) {
+        apiCall('sessions/ping', {
+          sesid: sessionId,
+        });
+      }
+    }, 15 * 1000);
+  });
+
+  onDestroy(() => {
+    clearInterval(intervalId);
+  });
 
   $: connection = useConnectionInfo({ conid });
   $: driver = findEngineDriver($connection, $extensions);
+  $: enableWrap = $currentEditorWrapEnabled || false;
 
   $: effect = useEffect(() => {
     return onSession(sessionId);
@@ -101,8 +162,10 @@
   function onSession(sid) {
     if (sid) {
       apiOn(`session-done-${sid}`, handleSessionDone);
+      apiOn(`session-closed-${sid}`, handleSessionClosed);
       return () => {
         apiOff(`session-done-${sid}`, handleSessionDone);
+        apiOff(`session-closed-${sid}`, handleSessionClosed);
       };
     }
     return () => {};
@@ -119,7 +182,7 @@
     invalidateCommands();
   }
 
-  $: if ($tabVisible && domEditor) {
+  $: if ($tabFocused && domEditor) {
     domEditor?.getEditor()?.focus();
   }
 
@@ -143,13 +206,54 @@
     return !!conid && (!$connection?.isReadOnly || driver?.readOnlySessions);
   }
 
-  async function executeCore(sql) {
+  export function toggleVisibleResultTabs() {
+    visibleResultTabs = !visibleResultTabs;
+  }
+
+  function getParameterSplitterOptions() {
+    if (!queryParameterStyle) {
+      return null;
+    }
+
+    if (!driver) {
+      return null;
+    }
+
+    return { ...driver.getQuerySplitterOptions('editor'), queryParameterStyle, allowDollarDollarString: false };
+  }
+
+  async function executeCore(sql, startLine = 0) {
     if (busy) return;
+
+    const parameters = extractQueryParameters(sql, getParameterSplitterOptions());
+
+    if (parameters.length > 0) {
+      const defaultValues = {
+        ...parameters.reduce((acc, x) => ({ ...acc, [x]: '' }), {}),
+        ...safeJsonParse(localStorage.getItem(`tabdata_queryParams_${tabid}`)),
+      };
+
+      showModal(QueryParametersModal, {
+        parameterNames: parameters,
+        parameterValues: defaultValues,
+        onExecute: values => {
+          localStorage.setItem(`tabdata_queryParams_${tabid}`, JSON.stringify(values));
+          const newSql = replaceQueryParameters(sql, values, getParameterSplitterOptions());
+          executeCoreWithParams(newSql, startLine);
+        },
+      });
+    } else {
+      executeCoreWithParams(sql, startLine);
+    }
+  }
+
+  async function executeCoreWithParams(sql, startLine = 0) {
     if (!sql || !sql.trim()) {
       showSnackbarError('Skipped executing empty query');
       return;
     }
 
+    executeStartLine = startLine;
     executeNumber++;
     visibleResultTabs = true;
 
@@ -179,13 +283,14 @@
   }
 
   export async function executeCurrent() {
-    const sql = domEditor.getCurrentCommandText();
-    await executeCore(sql);
+    const cmd = domEditor.getCurrentCommandText();
+    await executeCore(cmd.text, cmd.line);
   }
 
   export async function execute() {
     const selectedText = domEditor.getEditor().getSelectedText();
-    await executeCore(selectedText || $editorValue);
+    const startLine = domEditor.getEditor().getSelectionRange().start.row;
+    await executeCore(selectedText || $editorValue, selectedText ? startLine : 0);
   }
 
   export async function kill() {
@@ -207,6 +312,17 @@
 
   export function toggleComment() {
     domEditor.getEditor().execCommand('togglecomment');
+  }
+
+  export function copy() {
+    const selectedText = domEditor.getEditor().getSelectedText();
+    copyTextToClipboard(selectedText);
+  }
+
+  export function paste() {
+    getClipboardText().then(text => {
+      domEditor.getEditor().execCommand('paste', text);
+    });
   }
 
   export function find() {
@@ -249,6 +365,11 @@
     timerLabel.stop();
   };
 
+  const handleSessionClosed = () => {
+    sessionId = null;
+    handleSessionDone();
+  };
+
   const { editorState, editorValue, setEditorData } = useEditorData({
     tabid,
     loadFromArgs:
@@ -256,6 +377,10 @@
         ? () => applyScriptTemplate(initialArgs.scriptTemplate, $extensions, $$props)
         : null,
   });
+
+  function handleChangeErrors(errors) {
+    errorMessages = errors;
+  }
 
   function createMenu() {
     return [
@@ -270,15 +395,34 @@
       { command: 'query.save' },
       { command: 'query.saveAs' },
       { divider: true },
+      { command: 'query.copy' },
+      { command: 'query.paste' },
       { command: 'query.find' },
       { command: 'query.replace' },
+      { divider: true },
+      { command: 'query.toggleVisibleResultTabs' },
     ];
   }
 
   const quickExportHandlerRef = createQuickExportHandlerRef();
+
+  $: {
+    conid;
+    database;
+    if (canKill()) {
+      kill();
+    }
+    errorMessages = [];
+  }
+
+  let isInitialized = false;
+  let queryParameterStyle =
+    localStorage.getItem(`tabdata_queryParamStyle_${tabid}`) ??
+    initialArgs?.queryParameterStyle ??
+    (initialArgs?.scriptTemplate == 'CALL OBJECT' ? ':' : null);
 </script>
 
-<ToolStripContainer>
+<ToolStripContainer bind:this={domToolStrip}>
   <VerticalSplitter isSplitter={visibleResultTabs}>
     <svelte:fragment slot="1">
       {#if driver?.databaseEngineTypes?.includes('sql')}
@@ -286,25 +430,44 @@
           engine={$connection && $connection.engine}
           {conid}
           {database}
-          splitterOptions={driver?.getQuerySplitterOptions('script')}
+          splitterOptions={driver?.getQuerySplitterOptions('editor')}
+          options={{
+            wrap: enableWrap,
+          }}
           value={$editorState.value || ''}
           menu={createMenu()}
-          on:input={e => setEditorData(e.detail)}
+          on:input={e => {
+            setEditorData(e.detail);
+            if (isInitialized) {
+              markTabUnsaved(tabid);
+            }
+            errorMessages = [];
+          }}
           on:focus={() => {
             activator.activate();
+            domToolStrip?.activate();
             invalidateCommands();
+            setTimeout(() => {
+              isInitialized = true;
+            }, 100);
           }}
           bind:this={domEditor}
+          onExecuteFragment={(sql, startLine) => executeCore(sql, startLine)}
+          {errorMessages}
         />
       {:else}
         <AceEditor
-          mode={driver?.editorMode || 'text'}
+          mode={driver?.editorMode || 'sql'}
           value={$editorState.value || ''}
-          splitterOptions={driver?.getQuerySplitterOptions('script')}
+          splitterOptions={driver?.getQuerySplitterOptions('editor')}
+          options={{
+            wrap: enableWrap,
+          }}
           menu={createMenu()}
           on:input={e => setEditorData(e.detail)}
           on:focus={() => {
             activator.activate();
+            domToolStrip?.activate();
             invalidateCommands();
           }}
           bind:this={domEditor}
@@ -312,14 +475,16 @@
       {/if}
     </svelte:fragment>
     <svelte:fragment slot="2">
-      <ResultTabs tabs={[{ label: 'Messages', slot: 0 }]} {sessionId} {executeNumber} bind:resultCount>
+      <ResultTabs tabs={[{ label: 'Messages', slot: 0 }]} {sessionId} {executeNumber} bind:resultCount {driver}>
         <svelte:fragment slot="0">
           <SocketMessageView
             eventName={sessionId ? `session-info-${sessionId}` : null}
-            on:messageClick={handleMesageClick}
+            onMessageClick={handleMesageClick}
             {executeNumber}
+            startLine={executeStartLine}
             showProcedure
             showLine
+            onChangeErrors={handleChangeErrors}
           />
         </svelte:fragment>
       </ResultTabs>
@@ -333,6 +498,19 @@
     {#if resultCount == 1}
       <ToolStripExportButton command="jslTableGrid.export" {quickExportHandlerRef} label="Export result" />
     {/if}
+    <ToolStripDropDownButton
+      menu={() =>
+        QUERY_PARAMETER_STYLES.map(param => ({
+          label: param.text,
+          onClick: () => {
+            queryParameterStyle = param.value;
+            localStorage.setItem(`tabdata_queryParamStyle_${tabid}`, queryParameterStyle);
+          },
+        }))}
+      label={QUERY_PARAMETER_STYLES.find(x => x.value == queryParameterStyle)?.text}
+      icon="icon at"
+      title="Query parameter style"
+    />
   </svelte:fragment>
 </ToolStripContainer>
 

@@ -3,9 +3,10 @@ const { decryptConnection } = require('./crypting');
 const { getSshTunnelProxy } = require('./sshTunnelProxy');
 const platformInfo = require('../utility/platformInfo');
 const connections = require('../controllers/connections');
+const _ = require('lodash');
 
 async function loadConnection(driver, storedConnection, connectionMode) {
-  const { allowShellConnection } = platformInfo;
+  const { allowShellConnection, allowConnectionFromEnvVariables } = platformInfo;
 
   if (connectionMode == 'app') {
     return storedConnection;
@@ -33,6 +34,16 @@ async function loadConnection(driver, storedConnection, connectionMode) {
     }
     return loadedWithDb;
   }
+
+  if (allowConnectionFromEnvVariables) {
+    return _.mapValues(storedConnection, (value, key) => {
+      if (_.isString(value) && value.startsWith('${') && value.endsWith('}')) {
+        return process.env[value.slice(2, -1)];
+      }
+      return value;
+    });
+  }
+
   return storedConnection;
 }
 
@@ -52,7 +63,7 @@ async function connectUtility(driver, storedConnection, connectionMode, addition
       throw new Error(tunnel.message);
     }
 
-    connection.server = '127.0.0.1';
+    connection.server = tunnel.localHost;
     connection.port = tunnel.localPort;
   }
 
@@ -62,14 +73,17 @@ async function connectUtility(driver, storedConnection, connectionMode, addition
 
     if (connection.sslCaFile) {
       connection.ssl.ca = await fs.readFile(connection.sslCaFile);
+      connection.ssl.sslCaFile = connection.sslCaFile;
     }
 
     if (connection.sslCertFile) {
       connection.ssl.cert = await fs.readFile(connection.sslCertFile);
+      connection.ssl.sslCertFile = connection.sslCertFile;
     }
 
     if (connection.sslKeyFile) {
       connection.ssl.key = await fs.readFile(connection.sslKeyFile);
+      connection.ssl.sslKeyFile = connection.sslKeyFile;
     }
 
     if (connection.sslCertFilePassword) {

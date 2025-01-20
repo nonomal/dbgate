@@ -8,7 +8,7 @@
 
 <script>
   import DataFilterControl from '../datagrid/DataFilterControl.svelte';
-  import { findDesignerFilterType } from '../designer/designerTools';
+  import { findDesignerFilterBehaviour } from '../designer/designerTools';
   import CheckboxField from '../forms/CheckboxField.svelte';
   import SelectField from '../forms/SelectField.svelte';
   import TextField from '../forms/TextField.svelte';
@@ -18,6 +18,7 @@
   import TableControl from './TableControl.svelte';
   import FormStyledButton from '../buttons/FormStyledButton.svelte';
   import _ from 'lodash';
+  import FontIcon from '../icons/FontIcon.svelte';
 
   export let value;
   export let onChange;
@@ -36,6 +37,30 @@
       ...current,
       columns: (current.columns || []).filter(x => x.designerId != col.designerId || x.columnName != col.columnName),
     }));
+  };
+
+  const moveColumn = (col, d) => {
+    onChange(current => {
+      const index = _.findIndex(
+        current.columns || [],
+        x => col.designerId == x.designerId && col.columnName == x.columnName
+      );
+
+      if (index >= 0 && index + d >= 0 && index + d < current.columns?.length) {
+        let columns = [...current.columns];
+
+        const tmp = columns[index + d];
+        columns[index + d] = columns[index];
+        columns[index] = tmp;
+
+        return {
+          ...current,
+          columns,
+        };
+      }
+
+      return current;
+    });
   };
 
   const addExpressionColumn = () => {
@@ -182,7 +207,7 @@
       <SelectField
         isNative
         style="min-width:calc(100% - 9px)"
-        value={row.sortOrder}
+        value={row.sortOrder?.toString()}
         on:change={e => {
           changeColumn({ ...row, sortOrder: parseInt(e.detail) });
         }}
@@ -194,12 +219,26 @@
           { label: '2nd, descending', value: '-2' },
           { label: '3rd, ascending', value: '3' },
           { label: '3rd, descending', value: '-3' },
+          { label: '4th, ascending', value: '4' },
+          { label: '4th, descending', value: '-4' },
+          { label: '5th, ascending', value: '5' },
+          { label: '5th, descending', value: '-5' },
+          { label: '6th, ascending', value: '6' },
+          { label: '6th, descending', value: '-6' },
+          { label: '7th, ascending', value: '7' },
+          { label: '7th, descending', value: '-7' },
+          { label: '8th, ascending', value: '8' },
+          { label: '8th, descending', value: '-8' },
+          { label: '9th, ascending', value: '9' },
+          { label: '9th, descending', value: '-9' },
+          { label: '10th, ascending', value: '10' },
+          { label: '10th, descending', value: '-10' },
         ]}
       />
     </svelte:fragment>
     <svelte:fragment slot="5" let:row let:filterField>
       <DataFilterControl
-        filterType={findDesignerFilterType(row, value)}
+        filterBehaviour={findDesignerFilterBehaviour(row, value)}
         filter={row[filterField]}
         setFilter={filter => {
           changeColumn({ ...row, [filterField]: filter });
@@ -207,7 +246,11 @@
       />
     </svelte:fragment>
     <svelte:fragment slot="7" let:row>
-      <InlineButton on:click={() => removeColumn(row)}>Remove</InlineButton>
+      <div class="flex">
+        <InlineButton on:click={() => removeColumn(row)} square><FontIcon icon="icon delete" /></InlineButton>
+        <InlineButton on:click={() => moveColumn(row, -1)} square><FontIcon icon="icon arrow-up" /></InlineButton>
+        <InlineButton on:click={() => moveColumn(row, 1)} square><FontIcon icon="icon arrow-down" /></InlineButton>
+      </div>
     </svelte:fragment>
   </TableControl>
   <FormStyledButton value="Add custom expression" on:click={addExpressionColumn} style="width:200px" />

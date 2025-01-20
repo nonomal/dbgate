@@ -47,12 +47,12 @@
   ];
 
   function autodetect(selection) {
-    if (selection[0]?.engine?.databaseEngineTypes?.includes('document')) {
-      return 'jsonRow';
-    }
-
     if (selectionCouldBeShownOnMap(selection)) {
       return 'map';
+    }
+
+    if (selection[0]?.engine?.databaseEngineTypes?.includes('document')) {
+      return 'jsonRow';
     }
 
     const value = selection.length == 1 ? selection[0].value : null;
@@ -80,7 +80,7 @@
   import TextCellViewNoWrap from '../celldata/TextCellViewNoWrap.svelte';
   import TextCellViewWrap from '../celldata/TextCellViewWrap.svelte';
   import ErrorInfo from '../elements/ErrorInfo.svelte';
-  import { selectionCouldBeShownOnMap } from '../elements/MapView.svelte';
+  import { selectionCouldBeShownOnMap } from '../elements/SelectionMapView.svelte';
   import SelectField from '../forms/SelectField.svelte';
   import { selectedCellsCallback } from '../stores';
   import WidgetTitle from './WidgetTitle.svelte';

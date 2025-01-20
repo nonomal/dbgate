@@ -1,10 +1,17 @@
 const fs = require('fs-extra');
 const readline = require('readline');
+const crypto = require('crypto');
 const path = require('path');
 const { archivedir, clearArchiveLinksCache, resolveArchiveFolder } = require('../utility/directories');
 const socket = require('../utility/socket');
-const { saveFreeTableData } = require('../utility/freeTableStorage');
 const loadFilesRecursive = require('../utility/loadFilesRecursive');
+const getJslFileName = require('../utility/getJslFileName');
+const { getLogger, extractErrorLogData } = require('dbgate-tools');
+const dbgateApi = require('../shell');
+const jsldata = require('./jsldata');
+const platformInfo = require('../utility/platformInfo');
+
+const logger = getLogger('archive');
 
 module.exports = {
   folders_meta: true,
@@ -67,25 +74,28 @@ module.exports = {
         ...fileType('.matview.sql', 'matview.sql'),
       ];
     } catch (err) {
-      console.log('Error reading archive files', err.message);
+      logger.error(extractErrorLogData(err), 'Error reading archive files');
       return [];
     }
   },
 
   refreshFiles_meta: true,
   async refreshFiles({ folder }) {
-    socket.emitChanged(`archive-files-changed-${folder}`);
+    socket.emitChanged('archive-files-changed', { folder });
+    return true;
   },
 
   refreshFolders_meta: true,
   async refreshFolders() {
     socket.emitChanged(`archive-folders-changed`);
+    return true;
   },
 
   deleteFile_meta: true,
   async deleteFile({ folder, file, fileType }) {
     await fs.unlink(path.join(resolveArchiveFolder(folder), `${file}.${fileType}`));
-    socket.emitChanged(`archive-files-changed-${folder}`);
+    socket.emitChanged(`archive-files-changed`, { folder });
+    return true;
   },
 
   renameFile_meta: true,
@@ -94,7 +104,47 @@ module.exports = {
       path.join(resolveArchiveFolder(folder), `${file}.${fileType}`),
       path.join(resolveArchiveFolder(folder), `${newFile}.${fileType}`)
     );
-    socket.emitChanged(`archive-files-changed-${folder}`);
+    socket.emitChanged(`archive-files-changed`, { folder });
+    return true;
+  },
+
+  modifyFile_meta: true,
+  async modifyFile({ folder, file, changeSet, mergedRows, mergeKey, mergeMode }) {
+    await jsldata.closeDataStore(`archive://${folder}/${file}`);
+    const changedFilePath = path.join(resolveArchiveFolder(folder), `${file}.jsonl`);
+
+    if (!fs.existsSync(changedFilePath)) {
+      if (!mergedRows) {
+        return false;
+      }
+      const fileStream = fs.createWriteStream(changedFilePath);
+      for (const row of mergedRows) {
+        await fileStream.write(JSON.stringify(row) + '\n');
+      }
+      await fileStream.close();
+
+      socket.emitChanged(`archive-files-changed`, { folder });
+      return true;
+    }
+
+    const tmpchangedFilePath = path.join(resolveArchiveFolder(folder), `${file}-${crypto.randomUUID()}.jsonl`);
+    const reader = await dbgateApi.modifyJsonLinesReader({
+      fileName: changedFilePath,
+      changeSet,
+      mergedRows,
+      mergeKey,
+      mergeMode,
+    });
+    const writer = await dbgateApi.jsonLinesWriter({ fileName: tmpchangedFilePath });
+    await dbgateApi.copyStream(reader, writer);
+    if (platformInfo.isWindows) {
+      await fs.copyFile(tmpchangedFilePath, changedFilePath);
+      await fs.unlink(tmpchangedFilePath);
+    } else {
+      await fs.unlink(changedFilePath);
+      await fs.rename(tmpchangedFilePath, changedFilePath);
+    }
+    return true;
   },
 
   renameFolder_meta: true,
@@ -102,6 +152,7 @@ module.exports = {
     const uniqueName = await this.getNewArchiveFolder({ database: newFolder });
     await fs.rename(path.join(archivedir(), folder), path.join(archivedir(), uniqueName));
     socket.emitChanged(`archive-folders-changed`);
+    return true;
   },
 
   deleteFolder_meta: true,
@@ -113,40 +164,42 @@ module.exports = {
       await fs.rmdir(path.join(archivedir(), folder), { recursive: true });
     }
     socket.emitChanged(`archive-folders-changed`);
-  },
-
-  saveFreeTable_meta: true,
-  async saveFreeTable({ folder, file, data }) {
-    await saveFreeTableData(path.join(resolveArchiveFolder(folder), `${file}.jsonl`), data);
-    socket.emitChanged(`archive-files-changed-${folder}`);
     return true;
-  },
-
-  loadFreeTable_meta: true,
-  async loadFreeTable({ folder, file }) {
-    return new Promise((resolve, reject) => {
-      const fileStream = fs.createReadStream(path.join(resolveArchiveFolder(folder), `${file}.jsonl`));
-      const liner = readline.createInterface({
-        input: fileStream,
-      });
-      let structure = null;
-      const rows = [];
-      liner.on('line', line => {
-        const data = JSON.parse(line);
-        if (structure) rows.push(data);
-        else structure = data;
-      });
-      liner.on('close', () => {
-        resolve({ structure, rows });
-        fileStream.close();
-      });
-    });
   },
 
   saveText_meta: true,
   async saveText({ folder, file, text }) {
     await fs.writeFile(path.join(resolveArchiveFolder(folder), `${file}.jsonl`), text);
-    socket.emitChanged(`archive-files-changed-${folder}`);
+    socket.emitChanged(`archive-files-changed`, { folder });
+    return true;
+  },
+
+  saveJslData_meta: true,
+  async saveJslData({ folder, file, jslid, changeSet }) {
+    const source = getJslFileName(jslid);
+    const target = path.join(resolveArchiveFolder(folder), `${file}.jsonl`);
+    if (changeSet) {
+      const reader = await dbgateApi.modifyJsonLinesReader({
+        fileName: source,
+        changeSet,
+      });
+      const writer = await dbgateApi.jsonLinesWriter({ fileName: target });
+      await dbgateApi.copyStream(reader, writer);
+    } else {
+      await fs.copyFile(source, target);
+      socket.emitChanged(`archive-files-changed`, { folder });
+    }
+    return true;
+  },
+
+  saveRows_meta: true,
+  async saveRows({ folder, file, rows }) {
+    const fileStream = fs.createWriteStream(path.join(resolveArchiveFolder(folder), `${file}.jsonl`));
+    for (const row of rows) {
+      await fileStream.write(JSON.stringify(row) + '\n');
+    }
+    await fileStream.close();
+    socket.emitChanged(`archive-files-changed`, { folder });
     return true;
   },
 

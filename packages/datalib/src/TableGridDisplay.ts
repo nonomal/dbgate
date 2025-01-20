@@ -1,7 +1,7 @@
 import _ from 'lodash';
 import { filterName, isTableColumnUnique } from 'dbgate-tools';
 import { GridDisplay, ChangeCacheFunc, DisplayColumn, DisplayedColumnInfo, ChangeConfigFunc } from './GridDisplay';
-import {
+import type {
   TableInfo,
   EngineDriver,
   ViewInfo,
@@ -37,7 +37,8 @@ export class TableGridDisplay extends GridDisplay {
     public displayOptions: any,
     serverVersion,
     public getDictionaryDescription: DictionaryDescriptionFunc = null,
-    isReadOnly = false
+    isReadOnly = false,
+    public isRawMode = false
   ) {
     super(config, setConfig, cache, setCache, driver, dbinfo, serverVersion);
 
@@ -51,6 +52,7 @@ export class TableGridDisplay extends GridDisplay {
     }
 
     this.columns = this.getDisplayColumns(this.table, []);
+    this.addFormDisplayColumns(this.getDisplayColumns(this.table, []));
     this.filterable = true;
     this.sortable = true;
     this.groupable = true;
@@ -61,6 +63,24 @@ export class TableGridDisplay extends GridDisplay {
       this.changeSetKeyFields = this.table.primaryKey
         ? this.table.primaryKey.columns.map(x => x.columnName)
         : this.table.columns.map(x => x.columnName);
+    }
+
+    if (this.config.isFormView) {
+      this.addAllExpandedColumnsToSelected = true;
+      this.hintBaseColumns = this.formColumns;
+    }
+  }
+
+  addFormDisplayColumns(columns) {
+    for (const col of columns) {
+      this.formColumns.push(col);
+      if (this.isExpandedColumn(col.uniqueName)) {
+        const table = this.getFkTarget(col);
+        if (table) {
+          const subcolumns = this.getDisplayColumns(table, col.uniquePath);
+          this.addFormDisplayColumns(subcolumns);
+        }
+      }
     }
   }
 
@@ -153,6 +173,9 @@ export class TableGridDisplay extends GridDisplay {
   }
 
   addHintsToSelect(select: Select): boolean {
+    if (this.isRawMode) {
+      return false;
+    }
     let res = false;
     const groupColumns = this.groupColumns;
     for (const column of this.hintBaseColumns || this.getGridColumns()) {
@@ -268,7 +291,7 @@ export class TableGridDisplay extends GridDisplay {
     for (const column of columns) {
       if (this.addAllExpandedColumnsToSelected || this.config.addedColumns.includes(column.uniqueName)) {
         select.columns.push(
-          this.createColumnExpression(column, { name: column, alias: parentAlias }, column.uniqueName)
+          this.createColumnExpression(column, { name: column, alias: parentAlias }, column.uniqueName, 'view')
         );
         displayedColumnInfo[column.uniqueName] = {
           ...column,

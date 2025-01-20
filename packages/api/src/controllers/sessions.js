@@ -1,5 +1,5 @@
+const crypto = require('crypto');
 const _ = require('lodash');
-const uuidv1 = require('uuid/v1');
 const connections = require('./connections');
 const socket = require('../utility/socket');
 const { fork } = require('child_process');
@@ -8,6 +8,11 @@ const path = require('path');
 const { handleProcessCommunication } = require('../utility/processComm');
 const processArgs = require('../utility/processArgs');
 const { appdir } = require('../utility/directories');
+const { getLogger, extractErrorLogData } = require('dbgate-tools');
+const pipeForkLogs = require('../utility/pipeForkLogs');
+const config = require('./config');
+
+const logger = getLogger('sessions');
 
 module.exports = {
   /** @type {import('dbgate-types').OpenedSession[]} */
@@ -80,15 +85,22 @@ module.exports = {
 
   create_meta: true,
   async create({ conid, database }) {
-    const sesid = uuidv1();
+    const sesid = crypto.randomUUID();
     const connection = await connections.getCore({ conid });
-    const subprocess = fork(global['API_PACKAGE'] || process.argv[1], [
-      '--is-forked-api',
-      '--start-process',
-      'sessionProcess',
-      ...processArgs.getPassArgs(),
-      // ...process.argv.slice(3),
-    ]);
+    const subprocess = fork(
+      global['API_PACKAGE'] || process.argv[1],
+      [
+        '--is-forked-api',
+        '--start-process',
+        'sessionProcess',
+        ...processArgs.getPassArgs(),
+        // ...process.argv.slice(3),
+      ],
+      {
+        stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+      }
+    );
+    pipeForkLogs(subprocess);
     const newOpened = {
       conid,
       database,
@@ -103,7 +115,18 @@ module.exports = {
       if (handleProcessCommunication(message, subprocess)) return;
       this[`handle_${msgtype}`](sesid, message);
     });
-    subprocess.send({ msgtype: 'connect', ...connection, database });
+    subprocess.on('exit', () => {
+      this.opened = this.opened.filter(x => x.sesid != sesid);
+      this.dispatchMessage(sesid, 'Query session closed');
+      socket.emit(`session-closed-${sesid}`);
+    });
+
+    subprocess.send({
+      msgtype: 'connect',
+      ...connection,
+      database,
+      globalSettings: await config.getSettings(),
+    });
     return _.pick(newOpened, ['conid', 'database', 'sesid']);
   },
 
@@ -114,7 +137,7 @@ module.exports = {
       throw new Error('Invalid session');
     }
 
-    console.log(`Processing query, sesid=${sesid}, sql=${sql}`);
+    logger.info({ sesid, sql }, 'Processing query');
     this.dispatchMessage(sesid, 'Query execution started');
     session.subprocess.send({ msgtype: 'executeQuery', sql });
 
@@ -126,7 +149,7 @@ module.exports = {
     const { sesid } = await this.create({ conid, database });
     const session = this.opened.find(x => x.sesid == sesid);
     session.killOnDone = true;
-    const jslid = uuidv1();
+    const jslid = crypto.randomUUID();
     session.loadingReader_jslid = jslid;
     const fileName = queryName && appFolder ? path.join(appdir(), appFolder, `${queryName}.query.sql`) : null;
 
@@ -142,6 +165,31 @@ module.exports = {
       this.kill({ sesid: session.sesid });
     }
     return true;
+  },
+
+  startProfiler_meta: true,
+  async startProfiler({ sesid }) {
+    const jslid = crypto.randomUUID();
+    const session = this.opened.find(x => x.sesid == sesid);
+    if (!session) {
+      throw new Error('Invalid session');
+    }
+
+    logger.info({ sesid }, 'Starting profiler');
+    session.loadingReader_jslid = jslid;
+    session.subprocess.send({ msgtype: 'startProfiler', jslid });
+
+    return { state: 'ok', jslid };
+  },
+
+  stopProfiler_meta: true,
+  async stopProfiler({ sesid }) {
+    const session = this.opened.find(x => x.sesid == sesid);
+    if (!session) {
+      throw new Error('Invalid session');
+    }
+    session.subprocess.send({ msgtype: 'stopProfiler' });
+    return { state: 'ok' };
   },
 
   // cancel_meta: true,
@@ -162,6 +210,26 @@ module.exports = {
     }
     session.subprocess.kill();
     this.dispatchMessage(sesid, 'Connection closed');
+    return { state: 'ok' };
+  },
+
+  ping_meta: true,
+  async ping({ sesid }) {
+    const session = this.opened.find(x => x.sesid == sesid);
+    if (!session) {
+      throw new Error('Invalid session');
+    }
+    try {
+      session.subprocess.send({ msgtype: 'ping' });
+    } catch (err) {
+      logger.error(extractErrorLogData(err), 'Error pinging session');
+
+      return {
+        status: 'error',
+        message: 'Ping failed',
+      };
+    }
+
     return { state: 'ok' };
   },
 

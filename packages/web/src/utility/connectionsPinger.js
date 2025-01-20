@@ -1,7 +1,7 @@
 import _ from 'lodash';
-import { openedConnections, currentDatabase } from '../stores';
-import { apiCall } from './api';
-import { getConnectionList } from './metadataLoaders';
+import { currentDatabase, openedConnectionsWithTemporary, getCurrentConfig, getOpenedConnections } from '../stores';
+import { apiCall, getVolatileConnections, strmid } from './api';
+import hasPermission from '../utility/hasPermission';
 
 // const doServerPing = async value => {
 //   const connectionList = getConnectionList();
@@ -10,7 +10,21 @@ import { getConnectionList } from './metadataLoaders';
 // };
 
 const doServerPing = value => {
-  apiCall('server-connections/ping', { connections: value });
+  const config = getCurrentConfig();
+
+  const conidArray = [...value];
+  if (config.storageDatabase && hasPermission('internal-storage')) {
+    conidArray.push('__storage');
+  }
+  conidArray.push(...getVolatileConnections());
+  if (config.singleConnection) {
+    conidArray.push(config.singleConnection._id);
+  }
+
+  apiCall('server-connections/ping', {
+    conidArray,
+    strmid,
+  });
 };
 
 const doDatabasePing = value => {
@@ -26,15 +40,20 @@ let openedConnectionsHandle = null;
 let currentDatabaseHandle = null;
 
 export function subscribeConnectionPingers() {
-  openedConnections.subscribe(value => {
+  openedConnectionsWithTemporary.subscribe(value => {
     doServerPing(value);
     if (openedConnectionsHandle) window.clearInterval(openedConnectionsHandle);
-    openedConnectionsHandle = window.setInterval(() => doServerPing(value), 30 * 1000);
+    openedConnectionsHandle = window.setInterval(() => doServerPing(value), 20 * 1000);
   });
 
   currentDatabase.subscribe(value => {
     doDatabasePing(value);
     if (currentDatabaseHandle) window.clearInterval(currentDatabaseHandle);
-    currentDatabaseHandle = window.setInterval(() => doDatabasePing(value), 30 * 1000);
+    currentDatabaseHandle = window.setInterval(() => doDatabasePing(value), 20 * 1000);
   });
+}
+
+export function callServerPing() {
+  const connections = getOpenedConnections();
+  doServerPing(connections);
 }

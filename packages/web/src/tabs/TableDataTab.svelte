@@ -55,8 +55,9 @@
     onClick: () => getCurrentEditor().startAutoRefresh(),
   });
 
-  export const matchingProps = ['conid', 'database', 'schemaName', 'pureName'];
+  export const matchingProps = ['conid', 'database', 'schemaName', 'pureName', 'isRawMode'];
   export const allowAddToFavorites = props => true;
+  export const allowSwitchDatabase = props => true;
 </script>
 
 <script lang="ts">
@@ -65,14 +66,12 @@
   import TableDataGrid from '../datagrid/TableDataGrid.svelte';
   import useGridConfig from '../utility/useGridConfig';
   import {
+    changeSetChangedCount,
     changeSetContainsChanges,
     changeSetToSql,
     createChangeSet,
     createGridCache,
-    createGridConfig,
     getDeleteCascades,
-    TableFormViewDisplay,
-    TableGridDisplay,
   } from 'dbgate-datalib';
   import { findEngineDriver } from 'dbgate-tools';
   import { reloadDataCacheFunc } from 'dbgate-datalib';
@@ -98,13 +97,18 @@
   import ToolStripCommandButton from '../buttons/ToolStripCommandButton.svelte';
   import ToolStripExportButton, { createQuickExportHandlerRef } from '../buttons/ToolStripExportButton.svelte';
   import ToolStripCommandSplitButton from '../buttons/ToolStripCommandSplitButton.svelte';
-  import { getIntSettingsValue } from '../settings/settingsTools';
+  import { getBoolSettingsValue, getIntSettingsValue } from '../settings/settingsTools';
+  import useEditorData from '../query/useEditorData';
+  import { markTabSaved, markTabUnsaved } from '../utility/common';
+  import ToolStripButton from '../buttons/ToolStripButton.svelte';
+  import { getNumberIcon } from '../icons/FontIcon.svelte';
 
   export let tabid;
   export let conid;
   export let database;
   export let schemaName;
   export let pureName;
+  export let isRawMode = false;
 
   export const activator = createActivator('TableDataTab', true);
 
@@ -118,10 +122,30 @@
 
   $: connection = useConnectionInfo({ conid });
 
+  const { editorState, editorValue, setEditorData } = useEditorData({
+    tabid,
+    onInitialData: value => {
+      dispatchChangeSet({ type: 'reset', value });
+      invalidateCommands();
+      if (changeSetContainsChanges(value)) {
+        markTabUnsaved(tabid);
+      }
+    },
+  });
+
   const [changeSetStore, dispatchChangeSet] = createUndoReducer(createChangeSet());
 
+  $: {
+    setEditorData($changeSetStore.value);
+    if (changeSetContainsChanges($changeSetStore?.value)) {
+      markTabUnsaved(tabid);
+    } else {
+      markTabSaved(tabid);
+    }
+  }
+
   async function handleConfirmSql(sql) {
-    const resp = await apiCall('database-connections/run-script', { conid, database, sql });
+    const resp = await apiCall('database-connections/run-script', { conid, database, sql, useTransaction: true });
     const { errorMessage } = resp || {};
     if (errorMessage) {
       showModal(ErrorMessageModal, { title: 'Error when saving', message: errorMessage });
@@ -134,7 +158,11 @@
 
   export function save() {
     const driver = findEngineDriver($connection, $extensions);
-    const script = changeSetToSql($changeSetStore?.value, $dbinfo);
+
+    const script = driver.createSaveChangeSetScript($changeSetStore?.value, $dbinfo, () =>
+      changeSetToSql($changeSetStore?.value, $dbinfo)
+    );
+
     const deleteCascades = getDeleteCascades($changeSetStore?.value, $dbinfo);
     const sql = scriptToSql(driver, script);
     const deleteCascadesScripts = _.map(deleteCascades, ({ title, commands }) => ({
@@ -142,12 +170,17 @@
       script: scriptToSql(driver, commands),
     }));
     // console.log('deleteCascadesScripts', deleteCascadesScripts);
-    showModal(ConfirmSqlModal, {
-      sql,
-      onConfirm: sqlOverride => handleConfirmSql(sqlOverride || sql),
-      engine: driver.engine,
-      deleteCascadesScripts,
-    });
+    if (getBoolSettingsValue('skipConfirm.tableDataSave', false) && !deleteCascadesScripts?.length) {
+      handleConfirmSql(sql);
+    } else {
+      showModal(ConfirmSqlModal, {
+        sql,
+        onConfirm: confirmedSql => handleConfirmSql(confirmedSql),
+        engine: driver.engine,
+        deleteCascadesScripts,
+        skipConfirmSettingKey: deleteCascadesScripts?.length ? null : 'skipConfirm.tableDataSave',
+      });
+    }
   }
 
   export function canSave() {
@@ -206,12 +239,15 @@
   function createAutoRefreshMenu() {
     return [
       { divider: true },
+      { command: 'dataGrid.deepRefresh', hideDisabled: true },
       { command: 'tableData.stopAutoRefresh', hideDisabled: true },
       { command: 'tableData.startAutoRefresh', hideDisabled: true },
       'tableData.setAutoRefresh.1',
       ...INTERVALS.map(seconds => ({ command: `tableData.setAutoRefresh.${seconds}`, text: `...${seconds} seconds` })),
     ];
   }
+
+  $: console.log('isRawMode', isRawMode);
 </script>
 
 <ToolStripContainer>
@@ -241,38 +277,66 @@
 
     <!-- <ToolStripCommandButton command="dataGrid.refresh" hideDisabled />
     <ToolStripCommandButton command="dataForm.refresh" hideDisabled /> -->
-    <ToolStripCommandButton command="tableData.save" />
+
+    <ToolStripCommandButton command="dataForm.goToFirst" hideDisabled />
+    <ToolStripCommandButton command="dataForm.goToPrevious" hideDisabled />
+    <ToolStripCommandButton command="dataForm.goToNext" hideDisabled />
+    <ToolStripCommandButton command="dataForm.goToLast" hideDisabled />
+
+    <ToolStripCommandButton
+      command="tableData.save"
+      iconAfter={getNumberIcon(changeSetChangedCount($changeSetStore?.value))}
+    />
+    <ToolStripCommandButton command="dataGrid.revertAllChanges" hideDisabled />
     <ToolStripCommandButton command="dataGrid.insertNewRow" hideDisabled />
     <ToolStripCommandButton command="dataGrid.deleteSelectedRows" hideDisabled />
     <ToolStripCommandButton command="dataGrid.switchToForm" hideDisabled />
     <ToolStripCommandButton command="dataGrid.switchToTable" hideDisabled />
     <ToolStripExportButton {quickExportHandlerRef} />
+
+    <ToolStripButton
+      icon="icon structure"
+      on:click={() => {
+        openNewTab({
+          title: pureName,
+          icon: 'img table-structure',
+          tabComponent: 'TableStructureTab',
+          tabPreviewMode: true,
+          props: {
+            schemaName,
+            pureName,
+            conid,
+            database,
+            objectTypeField: 'tables',
+            defaultActionId: 'openStructure',
+          },
+        });
+      }}>Open structure</ToolStripButton
+    >
+
+    <ToolStripButton
+      icon="img sql-file"
+      on:click={() => {
+        openNewTab({
+          title: pureName,
+          icon: 'img sql-file',
+          tabComponent: 'SqlObjectTab',
+          tabPreviewMode: true,
+          props: {
+            schemaName,
+            pureName,
+            conid,
+            database,
+            objectTypeField: 'tables',
+            defaultActionId: 'showSql',
+          },
+        });
+      }}>Table SQL</ToolStripButton
+    >
+
+    <ToolStripButton
+      icon={$collapsedLeftColumnStore ? 'icon columns-outline' : 'icon columns'}
+      on:click={() => collapsedLeftColumnStore.update(x => !x)}>View columns</ToolStripButton
+    >
   </svelte:fragment>
 </ToolStripContainer>
-
-<StatusBarTabItem
-  text="Open structure"
-  icon="icon structure"
-  clickable
-  onClick={() => {
-    openNewTab({
-      title: pureName,
-      icon: 'img table-structure',
-      tabComponent: 'TableStructureTab',
-      props: {
-        schemaName,
-        pureName,
-        conid,
-        database,
-        objectTypeField: 'tables',
-      },
-    });
-  }}
-/>
-
-<StatusBarTabItem
-  text="View columns"
-  icon={$collapsedLeftColumnStore ? 'icon columns-outline' : 'icon columns'}
-  clickable
-  onClick={() => collapsedLeftColumnStore.update(x => !x)}
-/>

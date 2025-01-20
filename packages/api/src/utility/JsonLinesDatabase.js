@@ -1,6 +1,6 @@
+const crypto = require('crypto');
 const AsyncLock = require('async-lock');
 const fs = require('fs-extra');
-const uuidv1 = require('uuid/v1');
 
 const lock = new AsyncLock();
 
@@ -21,6 +21,12 @@ class JsonLinesDatabase {
       return;
     }
     await fs.writeFile(this.filename, this.data.map(x => JSON.stringify(x)).join('\n'));
+  }
+
+  async unload() {
+    this.data = [];
+    this.loadedOk = false;
+    this.loadPerformed = false;
   }
 
   async _ensureLoaded() {
@@ -57,7 +63,7 @@ class JsonLinesDatabase {
       ? obj
       : {
           ...obj,
-          _id: uuidv1(),
+          _id: crypto.randomUUID(),
         };
     this.data.push(elem);
     await this._save();
@@ -90,6 +96,12 @@ class JsonLinesDatabase {
     return obj;
   }
 
+  async updateAll(mapFunction) {
+    await this._ensureLoaded();
+    this.data = this.data.map(mapFunction);
+    await this._save();
+  }
+
   async patch(id, values) {
     await this._ensureLoaded();
     this.data = this.data.map(x => (x._id == id ? { ...x, ...values } : x));
@@ -103,6 +115,15 @@ class JsonLinesDatabase {
     this.data = this.data.filter(x => x._id != id);
     await this._save();
     return removed;
+  }
+
+  async transformAll(transformFunction) {
+    await this._ensureLoaded();
+    const newData = transformFunction(this.data);
+    if (newData) {
+      this.data = newData;
+      await this._save();
+    }
   }
 
   //   async _openReader() {

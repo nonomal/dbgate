@@ -1,4 +1,4 @@
-const { driverBase } = global.DBGATE_TOOLS;
+const { driverBase } = global.DBGATE_PACKAGES['dbgate-tools'];
 const Dumper = require('./Dumper');
 const { sqliteSplitterOptions, noSplitSplitterOptions } = require('dbgate-query-splitter/lib/options');
 
@@ -17,12 +17,13 @@ const dialect = {
   explicitDropConstraint: true,
   stringEscapeChar: "'",
   fallbackDataType: 'nvarchar',
+  allowMultipleValuesInsert: true,
   dropColumnDependencies: ['indexes', 'primaryKey', 'uniques'],
   quoteIdentifier(s) {
     return `[${s}]`;
   },
   anonymousPrimaryKey: true,
-  disableExplicitTransaction: true,
+  requireStandaloneSelectForScopeIdentity: true,
 
   createColumn: true,
   dropColumn: true,
@@ -33,6 +34,7 @@ const dialect = {
   createPrimaryKey: false,
   dropPrimaryKey: false,
   dropReferencesWhenDropTable: false,
+  filteredIndexes: true,
 };
 
 /** @type {import('dbgate-types').EngineDriver} */
@@ -43,6 +45,7 @@ const driver = {
   engine: 'sqlite@dbgate-plugin-sqlite',
   title: 'SQLite',
   readOnlySessions: true,
+  supportsTransactions: true,
   showConnectionField: (field, values) => field == 'databaseFile' || field == 'isReadOnly',
   showConnectionTab: (field) => false,
   beforeConnectionSave: (connection) => ({
@@ -50,7 +53,14 @@ const driver = {
     singleDatabase: true,
     defaultDatabase: getDatabaseFileLabel(connection.databaseFile),
   }),
-  getQuerySplitterOptions: (usage) => (usage == 'stream' ? noSplitSplitterOptions : sqliteSplitterOptions),
+
+  getQuerySplitterOptions: (usage) =>
+    usage == 'editor'
+      ? { ...sqliteSplitterOptions, ignoreComments: true, preventSingleLineSplit: true }
+      : usage == 'stream'
+      ? noSplitSplitterOptions
+      : sqliteSplitterOptions,
+
   // isFileDatabase: true,
   isElectronOnly: true,
 

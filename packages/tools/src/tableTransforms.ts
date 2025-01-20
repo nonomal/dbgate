@@ -1,4 +1,4 @@
-import { TableInfo } from 'dbgate-types';
+import type { TableInfo } from 'dbgate-types';
 import _cloneDeep from 'lodash/cloneDeep';
 import _fromPairs from 'lodash/fromPairs';
 import _get from 'lodash/get';
@@ -10,6 +10,7 @@ export function prepareTableForImport(table: TableInfo): TableInfo {
   res.uniques = [];
   res.checks = [];
   if (res.primaryKey) res.primaryKey.constraintName = null;
+  res.tableEngine = null;
   return res;
 }
 

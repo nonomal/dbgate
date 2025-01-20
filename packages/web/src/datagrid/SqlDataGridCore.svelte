@@ -5,7 +5,7 @@
     id: 'sqlDataGrid.openActiveChart',
     category: 'Data grid',
     name: 'Open active chart',
-    testEnabled: () => getCurrentEditor() != null,
+    testEnabled: () => getCurrentEditor() != null && hasPermission('dbops/charts'),
     onClick: () => getCurrentEditor().openActiveChart(),
   });
 
@@ -13,7 +13,7 @@
     id: 'sqlDataGrid.openQuery',
     category: 'Data grid',
     name: 'Open query',
-    testEnabled: () => getCurrentEditor() != null,
+    testEnabled: () => getCurrentEditor() != null && hasPermission('dbops/query'),
     onClick: () => getCurrentEditor().openQuery(),
   });
 
@@ -23,7 +23,7 @@
     name: 'Export',
     icon: 'icon export',
     keyText: 'CtrlOrCommand+E',
-    testEnabled: () => getCurrentEditor() != null,
+    testEnabled: () => getCurrentEditor() != null && hasPermission('dbops/export'),
     onClick: () => getCurrentEditor().exportGrid(),
   });
 
@@ -65,13 +65,10 @@
 
 <script lang="ts">
   import _ from 'lodash';
-  import { getContext } from 'svelte';
   import { registerQuickExportHandler } from '../buttons/ToolStripExportButton.svelte';
 
   import registerCommand from '../commands/registerCommand';
   import { extractShellConnection } from '../impexp/createImpExpScript';
-  import ImportExportModal from '../modals/ImportExportModal.svelte';
-  import { showModal } from '../modals/modalTools';
   import { apiCall } from '../utility/api';
 
   import { registerMenu } from '../utility/contextMenu';
@@ -83,6 +80,8 @@
   import ChangeSetGrider from './ChangeSetGrider';
 
   import LoadingDataGridCore from './LoadingDataGridCore.svelte';
+  import hasPermission from '../utility/hasPermission';
+  import { openImportExportTab } from '../utility/importExportTools';
 
   export let conid;
   export let display;
@@ -95,7 +94,9 @@
 
   export let macroPreview;
   export let macroValues;
-  export let selectedCellsPublished = () => [];
+  export let onPublishedCellsChanged;
+
+  let publishedCells = [];
 
   // export let onChangeGrider = undefined;
 
@@ -116,7 +117,7 @@
         display,
         macroPreview,
         macroValues,
-        selectedCellsPublished()
+        publishedCells
       );
     }
   }
@@ -142,7 +143,8 @@
     initialValues.sourceQueryType = coninfo.isReadOnly ? 'json' : 'native';
     initialValues.sourceList = display.baseTableOrSimilar ? [display.baseTableOrSimilar.pureName] : [];
     initialValues[`columns_${pureName}`] = display.getExportColumnMap();
-    showModal(ImportExportModal, { initialValues });
+    openImportExportTab(initialValues);
+    // showModal(ImportExportModal, { initialValues });
   }
 
   export function openQuery() {
@@ -151,6 +153,7 @@
         title: 'Query #',
         icon: 'img sql-file',
         tabComponent: 'QueryTab',
+        focused: true,
         props: {
           schemaName: display.baseTableOrSimilar?.schemaName,
           pureName: display.baseTableOrSimilar?.pureName,
@@ -207,11 +210,19 @@
   registerMenu(
     { command: 'sqlDataGrid.openActiveChart', tag: 'chart' },
     { command: 'sqlDataGrid.openQuery', tag: 'export' },
-    () => ({
-      ...createQuickExportMenu(quickExportHandler, { command: 'sqlDataGrid.export' }),
-      tag: 'export',
-    })
+    () =>
+      createQuickExportMenu(
+        quickExportHandler,
+        {
+          command: 'sqlDataGrid.export',
+        },
+        { tag: 'export' }
+      )
   );
+
+  function handleSetLoadedRows(rows) {
+    loadedRows = rows;
+  }
 </script>
 
 <LoadingDataGridCore
@@ -219,8 +230,13 @@
   {loadDataPage}
   {dataPageAvailable}
   {loadRowCount}
-  bind:loadedRows
-  bind:selectedCellsPublished
+  setLoadedRows={handleSetLoadedRows}
+  onPublishedCellsChanged={value => {
+    publishedCells = value;
+    if (onPublishedCellsChanged) {
+      onPublishedCellsChanged(value);
+    }
+  }}
   frameSelection={!!macroPreview}
   {grider}
   {display}
