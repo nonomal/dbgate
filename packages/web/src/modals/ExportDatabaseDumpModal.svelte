@@ -15,7 +15,7 @@
   import { closeCurrentModal, showModal } from './modalTools';
   import InputTextModal from './InputTextModal.svelte';
   import { apiCall } from '../utility/api';
-  import getConnectionLabel from '../utility/getConnectionLabel';
+  import { getConnectionLabel } from 'dbgate-tools';
 
   export let connection;
 
@@ -24,7 +24,7 @@
   let pureFileName = null;
 
   function getDefaultFileName() {
-    return `${connection.database}-${dateFormat(new Date(), 'yyyy-MM-dd-hh-mm-ss')}.sql`;
+    return `${connection.database}-${dateFormat(new Date(), 'yyyy-MM-dd-HH-mm-ss')}.sql`;
   }
 
   onMount(async () => {
@@ -63,16 +63,17 @@
 
   const handleBrowse = async () => {
     const electron = getElectron();
-    const files = await electron.showSaveDialog({
+    const file = await electron.showSaveDialog({
       properties: ['showOverwriteConfirmation'],
       filters: [
-        { name: 'SQL Files', extensions: ['*.sql'] },
+        { name: 'SQL Files', extensions: ['sql'] },
         { name: 'All Files', extensions: ['*'] },
       ],
+      defaultPath: outputFile,
     });
-    if (files && files[0]) {
+    if (file) {
       const path = window.require('path');
-      outputFile = files[0];
+      outputFile = file;
       outputLabel = path.parse(outputFile).name;
       pureFileName = null;
     }

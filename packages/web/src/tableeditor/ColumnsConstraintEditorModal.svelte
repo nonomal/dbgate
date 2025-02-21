@@ -17,6 +17,7 @@
   export let constraintType;
   export let constraintNameLabel = 'Constraint name';
   export let getExtractConstraintProps;
+  export let hideConstraintName = false;
 
   let constraintName = constraintInfo?.constraintName;
   let columns = constraintInfo?.columns || [];
@@ -33,6 +34,8 @@
       ...(getExtractConstraintProps ? getExtractConstraintProps() : {}),
     };
   }
+
+  $: isReadOnly = !setTableInfo;
 </script>
 
 <FormProvider>
@@ -42,12 +45,19 @@
     >
 
     <div class="largeFormMarker">
-      <div class="row">
-        <div class="label col-3">{constraintNameLabel}</div>
-        <div class="col-9">
-          <TextField value={constraintName} on:input={e => (constraintName = e.target['value'])} focused />
+      {#if !hideConstraintName}
+        <div class="row">
+          <div class="label col-3">{constraintNameLabel}</div>
+          <div class="col-9">
+            <TextField
+              value={constraintName}
+              on:input={e => (constraintName = e.target['value'])}
+              focused
+              disabled={isReadOnly}
+            />
+          </div>
         </div>
-      </div>
+      {/if}
 
       {#if $$slots.constraintProps}
         <slot name="constraintProps" />
@@ -61,6 +71,7 @@
               <SelectField
                 value={column.columnName}
                 isNative
+                disabled={isReadOnly}
                 options={tableInfo.columns.map(col => ({
                   label: col.columnName,
                   value: col.columnName,
@@ -81,6 +92,7 @@
           <div class="col-3 button">
             <FormStyledButton
               value="Delete"
+              disabled={isReadOnly}
               on:click={e => {
                 const x = [...columns];
                 x.splice(index, 1);
@@ -97,6 +109,7 @@
           {#key columns.length}
             <SelectField
               placeholder="Select column"
+              disabled={isReadOnly}
               value={''}
               on:change={e => {
                 if (e.detail)
@@ -127,6 +140,7 @@
     <svelte:fragment slot="footer">
       <FormSubmit
         value={'Save'}
+        disabled={isReadOnly}
         on:click={() => {
           closeCurrentModal();
           if (constraintInfo) {
@@ -142,6 +156,7 @@
         <FormStyledButton
           type="button"
           value="Remove"
+          disabled={isReadOnly}
           on:click={() => {
             closeCurrentModal();
             setTableInfo(tbl => editorDeleteConstraint(tbl, constraintInfo));

@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-const { Client } = require('ssh2');
 const net = require('net');
 const fs = require('fs');
 const os = require('os');
@@ -131,7 +130,7 @@ class SSHConnection {
     const connectionToBastion = await this.connect(bastionHost);
     return new Promise((resolve, reject) => {
       connectionToBastion.forwardOut(
-        '127.0.0.1',
+        this.options.bindHost,
         22,
         this.options.endHost,
         this.options.endPort || 22,
@@ -147,6 +146,7 @@ class SSHConnection {
   }
 
   async connect(host, stream) {
+    const { Client } = require('ssh2');
     this.debug('Connecting to "%s"', host);
     const connection = new Client();
     return new Promise(async (resolve, reject) => {
@@ -228,9 +228,9 @@ class SSHConnection {
             options.toPort
           );
           connection.forwardOut(
-            'localhost',
+            this.options.bindHost,
             options.fromPort,
-            options.toHost || 'localhost',
+            options.toHost || this.options.bindHost,
             options.toPort,
             (error, stream) => {
               if (error) {
@@ -241,7 +241,7 @@ class SSHConnection {
             }
           );
         })
-        .listen(options.fromPort, 'localhost', () => {
+        .listen(options.fromPort, this.options.bindHost, () => {
           return resolve();
         });
     });

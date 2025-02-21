@@ -1,7 +1,10 @@
 const _ = require('lodash');
 const express = require('express');
 const getExpressPath = require('./getExpressPath');
+const { MissingCredentialsError } = require('./exceptions');
+const { getLogger, extractErrorLogData } = require('dbgate-tools');
 
+const logger = getLogger('useController');
 /**
  * @param {string} route
  */
@@ -9,11 +12,11 @@ module.exports = function useController(app, electron, route, controller) {
   const router = express.Router();
 
   if (controller._init) {
-    console.log(`Calling init controller for controller ${route}`);
+    logger.info(`Calling init controller for controller ${route}`);
     try {
       controller._init();
     } catch (err) {
-      console.log(`Error initializing controller, exiting application`, err);
+      logger.error(extractErrorLogData(err), `Error initializing controller, exiting application`);
       process.exit(1);
     }
   }
@@ -37,6 +40,13 @@ module.exports = function useController(app, electron, route, controller) {
             if (data === undefined) return null;
             return data;
           } catch (err) {
+            if (err instanceof MissingCredentialsError) {
+              return {
+                missingCredentials: true,
+                apiErrorMessage: 'Missing credentials',
+                detail: err.detail,
+              };
+            }
             return { apiErrorMessage: err.message };
           }
         });
@@ -57,7 +67,7 @@ module.exports = function useController(app, electron, route, controller) {
     }
 
     if (raw) {
-      router[method](routeAction, controller[key]);
+      router[method](routeAction, (req, res) => controller[key](req, res));
     } else {
       router[method](routeAction, async (req, res) => {
         // if (controller._init && !controller._init_called) {
@@ -67,9 +77,17 @@ module.exports = function useController(app, electron, route, controller) {
         try {
           const data = await controller[key]({ ...req.body, ...req.query }, req);
           res.json(data);
-        } catch (e) {
-          console.log(e);
-          res.status(500).json({ apiErrorMessage: e.message });
+        } catch (err) {
+          logger.error(extractErrorLogData(err), `Error when processing route ${route}/${key}`);
+          if (err instanceof MissingCredentialsError) {
+            res.json({
+              missingCredentials: true,
+              apiErrorMessage: 'Missing credentials',
+              detail: err.detail,
+            });
+          } else {
+            res.status(500).json({ apiErrorMessage: (_.isString(err) ? err : err.message) ?? 'Unknown error' });
+          }
         }
       });
     }

@@ -1,4 +1,4 @@
-const { driverBase } = global.DBGATE_TOOLS;
+const { driverBase } = global.DBGATE_PACKAGES['dbgate-tools'];
 const { redisSplitterOptions } = require('dbgate-query-splitter/lib/options');
 const Dumper = require('./Dumper');
 
@@ -78,12 +78,10 @@ const driver = {
   showConnectionField: (field, values) => {
     if (field == 'useDatabaseUrl') return true;
     if (values.useDatabaseUrl) {
-      return ['databaseUrl', 'isReadOnly'].includes(field);
+      return ['databaseUrl', 'isReadOnly', 'treeKeySeparator'].includes(field);
     }
-    return ['server', 'port', 'password', 'isReadOnly'].includes(field);
+    return ['server', 'port', 'user', 'password', 'isReadOnly', 'treeKeySeparator'].includes(field);
   },
-
-  showConnectionTab: (field) => field == 'sshTunnel',
 };
 
 module.exports = driver;

@@ -12,8 +12,12 @@
   import WidgetColumnBarItem from './WidgetColumnBarItem.svelte';
   import SqlObjectList from './SqlObjectList.svelte';
   import DbKeysTree from './DbKeysTree.svelte';
+  import SingleConnectionDatabaseList from './SingleConnectionDatabaseList.svelte';
+  import _ from 'lodash';
+  import FocusedConnectionInfoWidget from './FocusedConnectionInfoWidget.svelte';
 
   export let hidden = false;
+  let domSqlObjectList = null;
 
   $: conid = $currentDatabase?.connection?._id;
   $: connection = useConnectionInfo({ conid });
@@ -24,9 +28,13 @@
 </script>
 
 <WidgetColumnBar {hidden}>
-  {#if !$config?.singleDatabase}
+  {#if $config?.singleConnection}
+    <WidgetColumnBarItem title="Databases" name="databases" height="35%" storageName="databasesWidget">
+      <SingleConnectionDatabaseList connection={$config?.singleConnection} />
+    </WidgetColumnBarItem>
+  {:else if !$config?.singleDbConnection}
     <WidgetColumnBarItem title="Connections" name="connections" height="35%" storageName="connectionsWidget">
-      <ConnectionList />
+      <ConnectionList passProps={{ onFocusSqlObjectList: () => domSqlObjectList.focus() }} />
     </WidgetColumnBarItem>
   {/if}
   <WidgetColumnBarItem
@@ -34,31 +42,59 @@
     name="pinned"
     height="15%"
     storageName="pinnedItemsWidget"
-    skip={!$pinnedDatabases?.length &&
-      !$pinnedTables.some(x => x.conid == conid && x.database == $currentDatabase?.name)}
+    skip={!_.compact($pinnedDatabases).length &&
+      !$pinnedTables.some(x => x && x.conid == conid && x.database == $currentDatabase?.name)}
   >
     <PinnedObjectsList />
   </WidgetColumnBarItem>
 
-  {#if conid && (database || singleDatabase)}
-    {#if driver?.databaseEngineTypes?.includes('sql') || driver?.databaseEngineTypes?.includes('document')}
-      <WidgetColumnBarItem
-        title={driver?.databaseEngineTypes?.includes('document') ? 'Collections' : 'Tables, views, functions'}
-        name="dbObjects"
-        storageName="dbObjectsWidget"
-      >
-        <SqlObjectList {conid} {database} />
-      </WidgetColumnBarItem>
-    {:else if driver?.databaseEngineTypes?.includes('keyvalue')}
-      <WidgetColumnBarItem title={'Keys'} name="dbObjects" storageName="dbObjectsWidget">
-        <DbKeysTree {conid} {database} />
-      </WidgetColumnBarItem>
-    {/if}
-  {:else}
-    <WidgetColumnBarItem title="Database content" name="dbObjects" storageName="dbObjectsWidget">
-      <WidgetsInnerContainer>
-        <ErrorInfo message="Database not selected" icon="img alert" />
-      </WidgetsInnerContainer>
-    </WidgetColumnBarItem>
-  {/if}
+  <WidgetColumnBarItem
+    title={driver?.databaseEngineTypes?.includes('document')
+      ? (driver?.collectionPluralLabel ?? 'Collections/containers')
+      : 'Tables, views, functions'}
+    name="dbObjects"
+    storageName="dbObjectsWidget"
+    skip={!(
+      conid &&
+      (database || singleDatabase) &&
+      (driver?.databaseEngineTypes?.includes('sql') || driver?.databaseEngineTypes?.includes('document'))
+    )}
+  >
+    <SqlObjectList {conid} {database} bind:this={domSqlObjectList} />
+  </WidgetColumnBarItem>
+
+  <WidgetColumnBarItem
+    title={'Keys'}
+    name="dbObjects"
+    storageName="dbObjectsWidget"
+    skip={!(conid && (database || singleDatabase) && driver?.databaseEngineTypes?.includes('keyvalue'))}
+  >
+    <DbKeysTree {conid} {database} />
+  </WidgetColumnBarItem>
+
+  <WidgetColumnBarItem
+    title="Database content"
+    name="dbObjects"
+    storageName="dbObjectsWidget"
+    skip={conid && (database || singleDatabase)}
+  >
+    <WidgetsInnerContainer>
+      <FocusedConnectionInfoWidget {conid} {database} connection={$connection} />
+
+      <ErrorInfo message="Database not selected" icon="img alert" />
+    </WidgetsInnerContainer>
+  </WidgetColumnBarItem>
+
+  <WidgetColumnBarItem
+    title="Database content"
+    name="dbObjects"
+    storageName="dbObjectsWidget"
+    skip={!(conid && (database || singleDatabase) && !driver)}
+  >
+    <WidgetsInnerContainer>
+      <FocusedConnectionInfoWidget {conid} {database} connection={$connection} />
+
+      <ErrorInfo message="Invalid database connection, driver not found" />
+    </WidgetsInnerContainer>
+  </WidgetColumnBarItem>
 </WidgetColumnBar>

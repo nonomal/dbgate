@@ -1,9 +1,11 @@
 <script lang="ts">
   import { presetDarkPalettes, presetPalettes } from '@ant-design/colors';
-  import { computeDbDiffRows } from 'dbgate-tools';
+  import { filterName, stringFilterBehaviour } from 'dbgate-tools';
 
   import { tick } from 'svelte';
   import { createDatabaseObjectMenu } from '../appobj/DatabaseObjectAppObject.svelte';
+  import DataFilterControl from '../datagrid/DataFilterControl.svelte';
+  import CheckboxField from '../forms/CheckboxField.svelte';
 
   import FontIcon from '../icons/FontIcon.svelte';
   import InputTextModal from '../modals/InputTextModal.svelte';
@@ -50,6 +52,7 @@
   export let designer;
   export let onMoveReferences;
   export let settings;
+  export let columnFilter;
 
   let movingPosition = null;
   let domWrapper;
@@ -63,6 +66,31 @@
   $: objectTypeField = table?.objectTypeField;
   $: left = table?.left;
   $: top = table?.top;
+  $: mainIcon = settings?.getMainTableIcon ? settings?.getMainTableIcon(designerId) : null;
+  $: specificDb = settings?.tableSpecificDb ? settings?.tableSpecificDb(designerId) : null;
+  $: filterParentRows = settings?.hasFilterParentRowsFlag ? settings?.hasFilterParentRowsFlag(designerId) : false;
+  $: isGrayed = settings?.isGrayedTable ? settings?.isGrayedTable(designerId) : false;
+  $: flatColumns = getFlatColumns(columns, columnFilter, 0);
+
+  function getFlatColumns(columns, filter, level) {
+    if (!columns) return [];
+    const res = [];
+    for (const col of columns) {
+      if (filterName(filter, col.columnName)) {
+        res.push({ ...col, expandLevel: level });
+        if (col.isExpanded) {
+          res.push(...getFlatColumns(col.getChildColumns ? col.getChildColumns() : null, filter, level + 1));
+        }
+      } else if (col.isExpanded) {
+        const children = getFlatColumns(col.getChildColumns ? col.getChildColumns() : null, filter, level + 1);
+        if (children.length > 0) {
+          res.push({ ...col, expandLevel: level });
+          res.push(...children);
+        }
+      }
+    }
+    return res;
+  }
 
   export function isSelected() {
     return table?.isSelectedTable;
@@ -151,7 +179,7 @@
   export function getDomTable() {
     const domRefs = { ...columnRefs };
     domRefs[''] = domWrapper;
-    return new DomTableRef(table, domRefs, domCanvas);
+    return new DomTableRef(table, domRefs, domCanvas, settings);
   }
 
   const handleSetTableAlias = () => {
@@ -178,6 +206,9 @@
   };
 
   function createMenu() {
+    if (settings?.tableMenu) {
+      return settings?.tableMenu({ designer, designerId, onRemoveTable });
+    }
     return [
       { text: 'Remove', onClick: () => onRemoveTable({ designerId }) },
       { divider: true },
@@ -205,6 +236,8 @@
         !isMultipleTableSelection && [{ divider: true }, createDatabaseObjectMenu({ ...table, conid, database })],
     ];
   }
+
+  // $: console.log('COLUMNS', flatColumns);
 </script>
 
 <div
@@ -227,22 +260,64 @@
 >
   <div
     class="header"
+    class:isGrayed
     class:isTable={objectTypeField == 'tables'}
     class:isView={objectTypeField == 'views'}
+    class:isCollection={objectTypeField == 'collections'}
     use:moveDrag={settings?.canSelectColumns ? [handleMoveStart, handleMove, handleMoveEnd] : null}
     use:contextMenu={settings?.canSelectColumns ? createMenu : '__no_menu'}
     style={getTableColorStyle($currentThemeDefinition, table)}
+    on:click={settings?.onClickTableHeader ? () => settings?.onClickTableHeader(designerId) : null}
   >
-    <div>{alias || pureName}</div>
+    <div>
+      {#if settings?.canCheckTables}
+        <CheckboxField
+          checked={settings?.isTableChecked ? settings?.isTableChecked(designerId) : false}
+          on:change={e => {
+            if (settings?.setTableChecked) {
+              settings?.setTableChecked(designerId, e.target.checked);
+            }
+          }}
+        />
+      {/if}
+
+      {#if mainIcon}
+        <FontIcon icon={mainIcon} />
+      {/if}
+
+      {alias || pureName}
+
+      {#if specificDb}
+        <FontIcon icon="icon database" title={specificDb.database} />
+      {/if}
+
+      {#if filterParentRows}
+        <FontIcon icon="icon parent-filter" title="Filter parent rows" />
+      {/if}
+    </div>
     {#if settings?.showTableCloseButton}
       <div class="close" on:click={() => onRemoveTable(table)}>
         <FontIcon icon="icon close" />
       </div>
     {/if}
   </div>
+  {#if settings?.getMutliColumnFilter && settings?.setMutliColumnFilter}
+    <DataFilterControl
+      filterBehaviour={stringFilterBehaviour}
+      filter={settings?.getMutliColumnFilter(designerId)}
+      setFilter={value => settings?.setMutliColumnFilter(designerId, value)}
+      placeholder="Data filter"
+    />
+  {/if}
+
   <div class="columns" on:scroll={() => tick().then(onMoveReferences)} class:scroll={settings?.allowScrollColumns}>
-    {#each columns || [] as column}
+    {#each flatColumns || [] as column (column.columnName)}
       <ColumnLine
+        nestingSupported={!!settings?.isColumnExpandable && columns.find(x => settings?.isColumnExpandable(x))}
+        isExpandable={settings?.isColumnExpandable && settings?.isColumnExpandable(column)}
+        isExpanded={settings?.isColumnExpanded && settings?.isColumnExpanded(column)}
+        expandLevel={settings?.columnExpandLevel ? settings?.columnExpandLevel(column) : 0}
+        toggleExpanded={value => settings?.toggleExpandedColumn(column, value)}
         {column}
         {table}
         {designer}
@@ -322,6 +397,13 @@
   }
   .header.isView {
     background: var(--theme-bg-magenta);
+  }
+  .header.isCollection {
+    background: var(--theme-bg-red);
+  }
+
+  .header.isGrayed {
+    background: var(--theme-bg-2);
   }
   .close {
     background: var(--theme-bg-1);

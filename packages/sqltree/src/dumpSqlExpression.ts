@@ -1,5 +1,5 @@
 import _ from 'lodash';
-import { SqlDumper } from 'dbgate-types';
+import type { SqlDumper } from 'dbgate-types';
 import { Expression, ColumnRefExpression } from './types';
 import { dumpSqlSourceRef } from './dumpSqlSource';
 
@@ -21,11 +21,24 @@ export function dumpSqlExpression(dmp: SqlDumper, expr: Expression) {
       break;
 
     case 'value':
-      dmp.put('%v', expr.value);
+      if (expr.dataType) {
+        dmp.put('%V', {
+          value: expr.value,
+          dataType: expr.dataType,
+        });
+      } else {
+        dmp.put('%v', expr.value);
+      }
       break;
 
     case 'raw':
       dmp.put('%s', expr.sql);
+      break;
+
+    case 'unaryRaw':
+      if (expr.beforeSql) dmp.putRaw(expr.beforeSql);
+      dumpSqlExpression(dmp, expr.expr);
+      if (expr.afterSql) dmp.putRaw(expr.afterSql);
       break;
 
     case 'call':
@@ -36,7 +49,7 @@ export function dumpSqlExpression(dmp: SqlDumper, expr: Expression) {
       break;
 
     case 'methodCall':
-      dumpSqlExpression(dmp, expr.thisObject)
+      dumpSqlExpression(dmp, expr.thisObject);
       dmp.put('.%s(', expr.method);
       dmp.putCollection(',', expr.args, x => dumpSqlExpression(dmp, x));
       dmp.put(')');

@@ -25,9 +25,6 @@
       newTop = offset.top - height;
 
       if (newTop < 0) newTop = 0;
-      if (newTop + height > window.innerHeight) {
-        element.style.height = `${window.innerHeight - newTop}px`;
-      }
     }
 
     if (newLeft != null) element.style.left = `${newLeft}px`;
@@ -58,7 +55,22 @@
   let submenuItem;
   let submenuOffset;
 
+  let switchIndex = 0;
+
   const dispatch = createEventDispatcher();
+  let closeHandlers = [];
+
+  function dispatchClose() {
+    dispatch('close');
+    for (const handler of closeHandlers) {
+      handler();
+    }
+    closeHandlers = [];
+  }
+
+  function registerCloseHandler(handler) {
+    closeHandlers.push(handler);
+  }
 
   function handleClick(e, item) {
     if (item.disabled) return;
@@ -70,9 +82,24 @@
       submenuOffset = hoverOffset;
       return;
     }
-    dispatch('close');
+    if (item.switchStore && item.switchValue) {
+      item.switchStore.update(x => ({
+        ...x,
+        [item.switchValue]: !x[item.switchValue],
+      }));
+      switchIndex++;
+      return;
+    }
+    dispatchClose();
     if (onCloseParent) onCloseParent();
     if (item.onClick) item.onClick();
+  }
+
+  function handleClickAlt(e, item) {
+    if (item.disabled) return;
+    dispatchClose();
+    if (onCloseParent) onCloseParent();
+    if (item.onClickAlt) item.onClickAlt();
   }
 
   onMount(() => {
@@ -84,13 +111,13 @@
     submenuOffset = hoverOffset;
   }, 500);
 
-  $: preparedItems = prepareMenuItems(items, { targetElement }, $commandsCustomized);
+  $: preparedItems = prepareMenuItems(items, { targetElement, registerCloseHandler }, $commandsCustomized);
 
   const handleClickOutside = event => {
     // if (element && !element.contains(event.target) && !event.defaultPrevented) {
     if (event.target.closest('ul.dropDownMenuMarker')) return;
 
-    dispatch('close');
+    dispatchClose();
   };
 
   onMount(() => {
@@ -113,10 +140,26 @@
           changeActiveSubmenu();
         }}
       >
-        <a on:click={e => handleClick(e, item)} class:disabled={item.disabled}>
-          {item.text || item.label}
+        <a on:click={e => handleClick(e, item)} class:disabled={item.disabled} class:bold={item.isBold}>
+          <span>
+            {#if item.switchValue && item.switchStoreGetter}
+              {#key switchIndex}
+                {#if item.switchStoreGetter()[item.switchValue]}
+                  <FontIcon icon="icon check" padRight />
+                {:else}
+                  <FontIcon icon="icon invisible-box" padRight />
+                {/if}
+              {/key}
+            {/if}
+            {item.text || item.label}
+          </span>
           {#if item.keyText}
             <span class="keyText">{formatKeyText(item.keyText)}</span>
+          {/if}
+          {#if item.iconAlt}
+            <span class="alt-icon" on:click={e => handleClickAlt(e, item)}>
+              <FontIcon icon={item.iconAlt} />
+            </span>
           {/if}
           {#if item.submenu}
             <div class="menu-right">
@@ -134,7 +177,7 @@
     {...submenuOffset}
     onCloseParent={() => {
       if (onCloseParent) onCloseParent();
-      dispatch('close');
+      dispatchClose();
     }}
   />
 {/if}
@@ -156,6 +199,8 @@
     cursor: default;
     white-space: nowrap;
     overflow-y: auto;
+    max-height: calc(100% - 20px);
+    user-select: none;
   }
 
   .keyText {
@@ -178,6 +223,10 @@
     color: var(--theme-font-3);
   }
 
+  a.bold {
+    font-weight: bold;
+  }
+
   a:hover:not(.disabled) {
     background-color: var(--theme-bg-1);
     text-decoration: none;
@@ -193,5 +242,13 @@
   .menu-right {
     position: relative;
     left: 15px;
+  }
+
+  .alt-icon:hover {
+    cursor: pointer;
+  }
+
+  .alt-icon:hover {
+    color: var(--theme-font-hover);
   }
 </style>

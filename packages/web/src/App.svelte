@@ -14,11 +14,16 @@
   // import { shouldWaitForElectronInitialize } from './utility/getElectron';
   import { subscribeConnectionPingers } from './utility/connectionsPinger';
   import { subscribePermissionCompiler } from './utility/hasPermission';
-  import { apiCall } from './utility/api';
+  import { apiCall, installNewVolatileConnectionListener } from './utility/api';
   import { getConfig, getSettings, getUsedApps } from './utility/metadataLoaders';
   import AppTitleProvider from './utility/AppTitleProvider.svelte';
   import getElectron from './utility/getElectron';
   import AppStartInfo from './widgets/AppStartInfo.svelte';
+  import SettingsListener from './utility/SettingsListener.svelte';
+  import { handleAuthOnStartup } from './clientAuth';
+  import { initializeAppUpdates } from './utility/appUpdate';
+
+  export let isAdminPage = false;
 
   let loadedApi = false;
   let loadedPlugins = false;
@@ -32,17 +37,23 @@
     try {
       // console.log('************** LOADING API');
 
+      const config = await getConfig();
+      await handleAuthOnStartup(config);
+
       const connections = await apiCall('connections/list');
       const settings = await getSettings();
-      const config = await getConfig();
       const apps = await getUsedApps();
-      loadedApi = settings && connections && config && apps;
+      const loadedApiValue = !!(settings && connections && config && apps);
 
-      if (loadedApi) {
+      if (loadedApiValue) {
         subscribeApiDependendStores();
         subscribeConnectionPingers();
         subscribePermissionCompiler();
+        installNewVolatileConnectionListener();
+        initializeAppUpdates();
       }
+
+      loadedApi = loadedApiValue;
 
       if (!loadedApi) {
         console.log('API not initialized correctly, trying again in 1s');
@@ -79,6 +90,7 @@
   <AppTitleProvider />
   {#if loadedPlugins}
     <OpenTabsOnStartup />
+    <SettingsListener />
     <Screen />
   {:else}
     <AppStartInfo
