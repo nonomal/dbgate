@@ -1,4 +1,4 @@
-const { SqlDumper, testEqualColumns, arrayToHexString } = global.DBGATE_TOOLS;
+const { SqlDumper, testEqualColumns, arrayToHexString } = global.DBGATE_PACKAGES['dbgate-tools'];
 
 class MsSqlDumper extends SqlDumper {
   constructor(driver, options) {
@@ -14,6 +14,16 @@ class MsSqlDumper extends SqlDumper {
     } else {
       super.endCommand();
     }
+  }
+
+  dropDatabase(name) {
+    this.putCmd(
+      `USE master;
+      ALTER DATABASE %i SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+      DROP DATABASE %i`,
+      name,
+      name
+    );
   }
 
   autoIncrement() {
@@ -57,7 +67,7 @@ class MsSqlDumper extends SqlDumper {
         break;
       case 'GROUP:DAY':
         this.put(
-          "^^convert(^varchar(100), ^datepart(^year, %c)) + '-' + ^right('0' + ^convert(^varchar(100), ^datepart(^month, %c)), 2)+'-' + ^right('0' + ^convert(^varchar(100), ^datepart(^day, %c)), 2)",
+          "^convert(^varchar(100), ^datepart(^year, %c)) + '-' + ^right('0' + ^convert(^varchar(100), ^datepart(^month, %c)), 2)+'-' + ^right('0' + ^convert(^varchar(100), ^datepart(^day, %c)), 2)",
           dumpExpr,
           dumpExpr,
           dumpExpr
@@ -98,13 +108,13 @@ class MsSqlDumper extends SqlDumper {
   }
 
   guessDefaultName(col) {
-    return col.defaultConstraint || `DF${col.schemaName || 'dbo'}_${col.pureName}_col.columnName`;
+    return col.defaultConstraint || `DF_${col.schemaName || 'dbo'}_${col.pureName}_col.columnName`;
   }
 
   createDefault(col) {
-    if (!col.defaultValue) return;
-    const defsql = col.defaultValue;
-    if (!defsql) {
+    if (col.defaultValue == null) return;
+    const defsql = col.defaultValue?.toString();
+    if (defsql) {
       const defname = this.guessDefaultName(col);
       this.putCmd('^alter ^table %f ^add ^constraint %i ^default %s for %i', col, defname, defsql, col.columnName);
     }
@@ -118,14 +128,17 @@ class MsSqlDumper extends SqlDumper {
     if (testEqualColumns(oldcol, newcol, false, false)) {
       this.dropDefault(oldcol);
       if (oldcol.columnName != newcol.columnName) this.renameColumn(oldcol, newcol.columnName);
-      this.createDefault(oldcol);
+      this.createDefault(newcol);
     } else {
       this.dropDefault(oldcol);
       if (oldcol.columnName != newcol.columnName) this.renameColumn(oldcol, newcol.columnName);
+      if (!oldcol.notNull) {
+        this.fillNewNotNullDefaults(newcol);
+      }
       this.put('^alter ^table %f ^alter ^column %i ', oldcol, oldcol.columnName, newcol.columnName);
       this.columnDefinition(newcol, { includeDefault: false });
       this.endCommand();
-      this.createDefault(oldcol);
+      this.createDefault(newcol);
     }
   }
 
@@ -145,6 +158,45 @@ class MsSqlDumper extends SqlDumper {
         newname
       );
   }
+
+  selectScopeIdentity() {
+    this.put('^select ^scope_identity()');
+  }
+
+  callableTemplate(func) {
+    const putParameters = (parameters, delimiter) => {
+      this.putCollection(delimiter, parameters || [], param => {
+        this.putRaw(param.parameterName);
+        if (param?.parameterMode == 'OUT') this.put(' ^output');
+      });
+    };
+    const putDeclareParameters = parameters => {
+      for (const param of parameters || []) {
+        this.put('^declare %s %s', param.parameterName, param.dataType);
+        if (param.parameterMode == 'IN') {
+          this.put(' = :%s', param.parameterName.substring(1));
+        }
+        this.endCommand();
+      }
+    };
+
+    if (func.objectTypeField == 'procedures') {
+      putDeclareParameters(func.parameters);
+      this.put('^execute %f&>&n', func);
+      putParameters(func.parameters, ',&n');
+      this.put('&<&n');
+      this.endCommand();
+    }
+
+    if (func.objectTypeField == 'functions') {
+      const pars = (func.parameters || []).filter(x => x.parameterMode != 'OUT');
+      putDeclareParameters(pars);
+      this.put('^select %f(', func);
+      putParameters(pars, ', ');
+      this.put(')');
+      this.endCommand();
+    }
+  }
 }
 
 MsSqlDumper.prototype.renameView = MsSqlDumper.prototype.renameObject;
@@ -161,5 +213,6 @@ MsSqlDumper.prototype.changeTriggerSchema = MsSqlDumper.prototype.changeObjectSc
 
 MsSqlDumper.prototype.renameTable = MsSqlDumper.prototype.renameObject;
 MsSqlDumper.prototype.changeTableSchema = MsSqlDumper.prototype.changeObjectSchema;
+MsSqlDumper.prototype.renameSqlObject = MsSqlDumper.prototype.renameObject;
 
 module.exports = MsSqlDumper;

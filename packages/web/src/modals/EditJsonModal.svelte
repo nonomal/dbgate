@@ -9,6 +9,7 @@
 
   import ModalBase from './ModalBase.svelte';
   import { closeCurrentModal, showModal } from './modalTools';
+  import { _t } from '../translations';
 
   export let onSave;
   export let json;
@@ -43,7 +44,8 @@
 
     <div slot="footer">
       <FormStyledButton
-        value="Save"
+        value={_t('common.save', { defaultMessage: 'Save' })}
+        data-testid="EditJsonModal_saveButton"
         on:click={() => {
           try {
             const parsed = JSON.parse(value);
@@ -56,7 +58,12 @@
           }
         }}
       />
-      <FormStyledButton type="button" value="Close" on:click={closeCurrentModal} />
+      <FormStyledButton
+        type="button"
+        value="Close"
+        on:click={closeCurrentModal}
+        data-testid="EditJsonModal_closeButton"
+      />
     </div>
   </ModalBase>
 </FormProvider>

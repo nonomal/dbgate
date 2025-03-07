@@ -20,6 +20,9 @@
   const queryFiles = useFiles({ folder: 'query' });
   const sqliteFiles = useFiles({ folder: 'sqlite' });
   const diagramFiles = useFiles({ folder: 'diagrams' });
+  const jobFiles = useFiles({ folder: 'jobs' });
+  const perspectiveFiles = useFiles({ folder: 'perspectives' });
+  const modelTransformFiles = useFiles({ folder: 'modtrans' });
 
   $: files = [
     ...($sqlFiles || []),
@@ -29,10 +32,31 @@
     ...($queryFiles || []),
     ...($sqliteFiles || []),
     ...($diagramFiles || []),
+    ...($perspectiveFiles || []),
+    ...($jobFiles || []),
+    ...($modelTransformFiles || []),
   ];
 
   function handleRefreshFiles() {
-    apiCall('files/refresh', { folders: ['sql', 'shell', 'markdown', 'charts', 'query', 'sqlite', 'diagrams'] });
+    apiCall('files/refresh', {
+      folders: [
+        'sql',
+        'shell',
+        'markdown',
+        'charts',
+        'query',
+        'sqlite',
+        'diagrams',
+        'perspectives',
+        'jobs',
+        'modtrans',
+      ],
+    });
+  }
+
+  function dataFolderTitle(folder) {
+    if (folder == 'modtrans') return 'Model transforms';
+    return _.startCase(folder);
   }
 </script>
 
@@ -45,5 +69,5 @@
     </InlineButton>
   </SearchBoxWrapper>
 
-  <AppObjectList list={files} module={savedFileAppObject} groupFunc={data => _.startCase(data.folder)} {filter} />
+  <AppObjectList list={files} module={savedFileAppObject} groupFunc={data => dataFolderTitle(data.folder)} {filter} />
 </WidgetsInnerContainer>

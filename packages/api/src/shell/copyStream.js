@@ -1,11 +1,52 @@
 const EnsureStreamHeaderStream = require('../utility/EnsureStreamHeaderStream');
-const Stream = require('stream');
 const ColumnMapTransformStream = require('../utility/ColumnMapTransformStream');
+const streamPipeline = require('../utility/streamPipeline');
+const { getLogger, extractErrorLogData, RowProgressReporter, extractErrorMessage } = require('dbgate-tools');
+const logger = getLogger('copyStream');
+const stream = require('stream');
 
-function copyStream(input, output, options) {
-  const { columns } = options || {};
+class ReportingTransform extends stream.Transform {
+  constructor(reporter, options = {}) {
+    super({ ...options, objectMode: true });
+    this.reporter = reporter;
+  }
+  _transform(chunk, encoding, callback) {
+    if (!chunk?.__isStreamHeader) {
+      this.reporter.add(1);
+    }
+    this.push(chunk);
+    callback();
+  }
+  _flush(callback) {
+    this.reporter.finish();
+    callback();
+  }
+}
+
+/**
+ * Copies reader to writer. Used for import, export tables and transfer data between tables
+ * @param {readerType} input - reader object
+ * @param {writerType} output - writer object
+ * @param {object} options - options
+ * @returns {Promise}
+ */
+async function copyStream(input, output, options) {
+  const { columns, progressName } = options || {};
+
+  if (progressName) {
+    process.send({
+      msgtype: 'progress',
+      progressName,
+      status: 'running',
+    });
+  }
 
   const transforms = [];
+
+  if (progressName) {
+    const reporter = new RowProgressReporter(progressName, 'readRowCount');
+    transforms.push(new ReportingTransform(reporter));
+  }
   if (columns) {
     transforms.push(new ColumnMapTransformStream(columns));
   }
@@ -13,36 +54,37 @@ function copyStream(input, output, options) {
     transforms.push(new EnsureStreamHeaderStream());
   }
 
-  // return new Promise((resolve, reject) => {
-  //   Stream.pipeline(input, ...transforms, output, err => {
-  //     if (err) {
-  //       reject(err);
-  //     } else {
-  //       resolve();
-  //     }
-  //   });
-  // });
+  try {
+    await streamPipeline(input, transforms, output);
 
-  return new Promise((resolve, reject) => {
-    const finisher = output['finisher'] || output;
-    finisher.on('finish', resolve);
-    finisher.on('error', reject);
-
-    let lastStream = input;
-    for (const tran of transforms) {
-      lastStream.pipe(tran);
-      lastStream = tran;
+    if (progressName) {
+      process.send({
+        msgtype: 'progress',
+        progressName,
+        status: 'done',
+      });
     }
-    lastStream.pipe(output);
+  } catch (err) {
+    process.send({
+      msgtype: 'copyStreamError',
+      copyStreamError: {
+        message: extractErrorMessage(err),
+        ...err,
+      },
+    });
 
-    //  if (output.requireFixedStructure) {
-    //   const ensureHeader = new EnsureStreamHeaderStream();
-    //   input.pipe(ensureHeader);
-    //   ensureHeader.pipe(output);
-    // } else {
-    //   input.pipe(output);
-    // }
-  });
+    if (progressName) {
+      process.send({
+        msgtype: 'progress',
+        progressName,
+        status: 'error',
+        errorMessage: extractErrorMessage(err),
+      });
+    }
+
+    logger.error(extractErrorLogData(err, { progressName }), 'Import/export job failed');
+    // throw err;
+  }
 }
 
 module.exports = copyStream;

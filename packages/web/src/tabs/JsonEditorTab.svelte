@@ -27,13 +27,14 @@
 
   export let tabid;
 
-  const tabVisible: any = getContext('tabVisible');
+  const tabFocused: any = getContext('tabFocused');
 
   export const activator = createActivator('JsonEditorTab', false);
 
   let domEditor;
+  let domToolStrip;
 
-  $: if ($tabVisible && domEditor) {
+  $: if ($tabFocused && domEditor) {
     domEditor?.getEditor()?.focus();
   }
 
@@ -72,13 +73,14 @@
   }
 </script>
 
-<ToolStripContainer>
+<ToolStripContainer bind:this={domToolStrip}>
   <AceEditor
     value={$editorState.value || ''}
     menu={createMenu()}
     on:input={e => setEditorData(e.detail)}
     on:focus={() => {
       activator.activate();
+      domToolStrip?.activate();
       invalidateCommands();
     }}
     bind:this={domEditor}

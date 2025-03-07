@@ -8,6 +8,456 @@ Builds:
  - linux - application for linux
  - win - application for Windows
 
+### 6.2.1
+- ADDED: Commit/rollback and autocommit in scripts #1039
+- FIXED: Doesn't import all the records from MongoDB #1044
+- ADDED: Show server name alongside database name in title of the tab group #1041
+- ADDED: Can't open Sqlite through web #956
+- FIXED: Crashed after text input at columns search #1049
+- FIXED: Incorrect autojoin for foreign keys with more columns #1051
+- FIXED: Scroll in XML cell view, XML view respect themes
+- REMOVED: armv7l build for Linux (because of problems with glibc compatibility)
+- CHANGED: Upgraded to node:22 for docker builds
+- CHANGED: Upgraded SQLite engine version (better-sqlite3@11.8.1)
+
+### 6.2.0
+- ADDED: Query AI Assistant (Premium)
+- ADDED: Cassandra database support
+- ADDED: XML cell data view
+- FIXED: Filtering by value in Oracle #1009
+- FIXED: Operand type clash: uniqueidentifier is incompatible with int #565
+- FIXED: UX in administration
+- FIXED: Error reporting of broken connections (sometimes it caused infinite loading of data grid)
+- ADDED: Azure managed identity support (Team Premium)
+- ADDED: Expanded JSON cell view
+- CHANGED: Open real executed query, when datagrid shows loading error
+
+### 6.1.6
+- FIXED: Hotfix build process for premium edition
+
+### 6.1.5
+- FIXED: Serious security hotfix (for Docker and NPM, when using LOGIN and PASSWORD environment variables or LOGIN_PASSWORD_xxx)
+- no changes for desktop app and for Team premium edition, when using storage DB
+
+### 6.1.4
+- CHANGED: Show Data/Structure button in one place #1015
+- ADDED: Data view coloring (every second row) #1014
+- ADDED: Pin icon for tab in preview mode (#1013)
+- FIXED: Pin icon misplaced #1007
+- ADDED: Set client name when connecting to redis #1004
+- ADDED: Redis loading keys optimalization #1002
+- ADDED: Browse redis keys with preview with keyboard
+- FIXED: Cannot expand tables and views returned from search #1000
+- ADDED: Expand all/Collapse all/Expand document commands in MongoDB JSON view #976
+- ADDED: Configurable page size for MongoDB collection #976
+- ADDED: Redis - SSL connection
+- ADDED: Redis JSON format for String values #852
+
+### 6.1.3
+- FIXED: Fulltext search now shows correctly columns and SQL code lines
+- ADDED: Configuration of SSH tunnel local host (IPv4 vs IPv6). Should fix majority of SSH tunnel problems
+- FIXED: Handled SSH tunnel connection error, now it shows error instead of connecting forever
+- ADDED: Support of triggers (SQLite)
+- ADDED: Create, drop trigger 
+- ADDED: Support for MySQL scheduled events
+- FIXED: Cannot connect to DB using askUser/askPassword mode #995
+- FIXED: Filtering in Oracle #992
+- ADDED: Open table in raw mode #991, #962
+- ADDED: Introduced E2E Cypress tests, test refactor
+
+### 6.1.1
+- ADDED: Trigger support (SQL Server, PostgreSQL, MySQL, Oracle)
+- FIXED: PostgreSQL and Oracle export #970
+- FIXED: Cursor Becomes Stuck When Escaping "Case" #954
+- CHANGED: Defualt search criteria for tables are names only
+- FIXED: Search in packed list
+
+### 6.1.0
+- ADDED: Fulltext search in DB model and connections, highlight searched names
+- ADDED: Tab preview mode configuration #963
+- CHANGED: Single-click to open server connection/database + ability to configure this #959
+- ADDED: Option to align numbers to right in data grid #957
+- FIXED: Cursor Becomes Stuck When Escaping "Case" #954
+- ADDED: Postgres GEOGRAPHY types are shown on map, event when executing query #948
+- FIXED: Error displaying CLOB and NCLOB in Oracle
+- FIXED: Analysing of foreign keys in Postgres and MS SQL, when the same FKS are used across different schemas
+- ADDED: Support of views, procedures, functions to Oracle. Added integration tests for Oracle
+- ADDED: Display "No rows" message, quick add new row
+- ADDED: Choose default database from list
+- ADDED: Default database is automatically selected on connect
+- ADDED: Apple-Silicon-only build for Mac #949
+- ADDED: Display comment into tables and column list #755
+
+### 6.0.0
+- ADDED: Order or filter the indexes for huge tables #922
+- ADDED: Empty string filters
+- CHANGED: (Premium) Workflow for new installation (used in Docker and AWS distribution)
+- ADDED: Show stored procedure and function parameters (MySQL, PostgreSQL, SQL Server, MariaDB) #348
+- FIXED: Selected database has changed when closing database grouped tab #983
+- ADDED: Add line break option to editor #823
+- ADDED: Order or filter the indexes for huge tables #922
+- ADDED: Preview mode for the top bar tab like vscode #767
+- ADDED: Keyboard navigatioon between connections, databases and tables
+- FIXED: Fixed some issues in connection search
+- FIXED: Schema selection in Export does not provide all schemas #924
+- CHANGED: Standardized Window menu in MacOS app
+- FIXED: Typecast ::date is treated as a parameter #925
+- FIXED: App crashes when trying to 'Open Structure' in a readonly connection #926
+- FIXED: Selected database has changed when closing database grouped tab #938
+- CHANGED: (Premium) Query designer and Query perspective designer moved to Premium editioin
+- CHANGED: (Premium) Compare database tool - many improvements, moved to Premium edition
+- ADDED: (Premium) Export DB model - exporting model to YAML folder, JSON or SQL folder
+- CHANGED: Model deployer - many improvements, support of rename missing objects
+- ADDED: (Premium) Premium NPM distribution
+- CHANGED: (Premium) Amazon Redshift driver moved to Premium edition
+- ADDED: Generated API documentation https://dbgate.org/docs/apidoc.html
+- ADDED: NPM distribution now supports all dbgate database connectors, many improvements NPM packages
+- CHANGED: Optimalized size of NPM plugins (eg. dbgate-plugin-mssql from 1.34 MB to 71 kB)
+- CHANGED: Unsaved connections are now shown in "Recent and unsaved" folder after disconnect
+- FIXED: Correctly show focused control, as defined by UX standards
+- ADDED: Data duplicator - weak references
+- ADDED: View JSON detail of log messages from export/import jobs and query executions
+- ADDED: Rename procedure/function context menu
+- ADDED: Show SQL quick view
+
+### 5.5.6
+- FIXED: DbGate process consumes 100% after UI closed - Mac, Linux (#917, #915)
+- FIXED: Correctly closing connection behind SSH tunnel (#920)
+- FIXED: Updating MongoDB documents on MongoDB 4 (#916)
+- FIXED: (Premium) DbGate container correctly waits for underlying storage database, if database container is started after dbgate container is started
+- FIXED: (Premium) Better handling of connection storage errors
+
+### 5.5.5
+- ADDED: AWS IAM authentication for MySQL, MariaDB, PostgreSQL (Premium)
+- FIXED: Datitme filtering #912
+- FIXED: Load redis keys
+- ADDED: Query parameters #913
+- FIXED: Data grid with hidden columns #911
+- ADDED: Added buttons for one-click authentification methods (Anonymous, OAuth) (Team Premium)
+- ADDED: Link for switching Admin/user login (Team Premium)
+- FIXED: Save connection params in administration for MS SQL and Postgres storages (Team Premium)
+
+### 5.5.4
+- FIXED: correct handling when use LOGIN and PASSWORD env variables #903
+- FIXED: fixed problems in dbmodel commandline tool
+- ADDED: dbmodel - allow connection defined in environment variables
+- FIXED: Load postgres schema on Azure #906
+- FIXED: Oauth2 in combination with Google doesn't log payload #727
+- CHANGED: Improved error reporting for unhandler errors
+- CHANGED: Don't restart docker container in case of unhandler error
+- FIXED: Crash when displaying specific data values from MongoDB #908
+- ADDED: (Premium) Show purchase button after trial license is expired
+
+### 5.5.3
+- FIXED: Separate schema mode #894 - for databases with many schemas
+- FIXED: Sort by UUID column in POstgreSQL #895
+- ADDED: Load pg_dump outputs #893
+- ADDED: Improved column mapping in import/export #330
+- FIXED: Fixed some errors in create-table workflow
+- CHANGED: Show single schema by default only if all objects are from default schema
+- FIXED: MS Entra authentication for Azure SQL
+
+### 5.5.2
+- FIXED: MySQL, PostgreSQL readonly conections #900
+
+### 5.5.1
+- ADDED: Clickhouse support (#532)
+- ADDED: MySQL - specify table engine, show table engine in table list
+- FIXED: Hidden primary key name in PK editor for DB engines with anonymous PK (MySQL)
+- CHANGED: Import/export dialog is now tacub instead of modal
+- ADDED: Saving import/export job
+- REMOVED: Ability to reopen export/import wizard from generated script. This was a bit hack, now you could save import/export job instead
+- ADDED: Autodetect CSV delimited
+- FIXED: Import CSV files with spaces around quotes
+- ADDED: JSON file import
+- ADDED: JSON export can export objects with ID field used as object key
+- ADDED: JSON and JSON lines imports supports importing from web URL
+- FIXED: Editing imported URL in job editor
+- ADDED: Quick export from table data grid (#892)
+- CHANGED: Create table workflow is reworked, you can specify schema and table name in table editor
+- FIXED: After saving new table, table editor is reset to empty state
+- ADDED: (PostgreSQL, SQL Server) - ability to filter objects by schema
+- ADDED: (PostgreSQL, SQL Server) - Use separate schemas option - for databases with lot of schemas, only selected schema is loaded
+- FIXED: Internal refactor of drivers, client objects are not more messed up with auxiliary fields
+- ADDED: Copy connection error to clipboard after clicking on error icon
+- FIXED: (MySQL) Fixed importing SQL dump exported from mysqldump (#702)
+- FIXED: (PostgreSQL) Fixed filtering JSONB fields (#889)
+- FIXED: OIDC authentication not working anymore (#891)
+- ADDED: Added tests for import from CSV and JSON
+- FIXED: multiple shortcuts handling #898
+- ADDED: (Premium) MS Entra authentization for Azure SQL databases
+
+### 5.4.4
+- CHANGED: Improved autoupdate, notification is now in app
+- CHANGED: Default behaviour of autoupdate, new version is downloaded after click of "Download" button
+- ADDED: Ability to configure autoupdate (check only, check+download, don't check)
+- ADDED: Option to run check for new version manually
+- FIXED: Fixed autoupgrade channel for premium edition
+- FIXED: Fixes following issues: #886, #865, #782, #375
+
+### 5.4.2
+- FIXED: DbGate now works correctly with Oracle 10g
+- FIXED: Fixed update channel for premium edition
+
+### 5.4.1
+- FIXED: Broken older plugins #881
+- ADDED: Premium edition - "Start trial" button
+
+### 5.4.0
+- ADDED: Support for CosmosDB (Premium only)
+- ADDED: Administration UI (Premium only)
+- ADDED: New application icon
+- ADDED: MongoDB type support in data editing
+- ADDED: MongoDB - posibility to remove field
+- ADDED: Oracle - posibility to connect via SID
+- FIXED: Many improvements in MongoDB filtering
+- FIXED: Switch to form and back to table rows missing #343
+- ADDED: Posibility to deactivate MongoDB Profiler #745
+- ADDED: Ability to use Oracle thick driver - neccessary for connecting older Oracle servers #843
+- FIXED: Connection permissions configuration is broken #860
+- ADDED: ssh key file authentication option missing #876
+- ADDED: Ability to reset layout #878
+- FIXED: Script with escaped backslash causes erro #880
+
+### 5.3.4
+- FIXED: On blank system does not start (window does not appear) #862
+- FIXED: Missing Execute, Export bar #861
+
+### 5.3.3
+- FIXED: The application Window is not visible when openning after changing monitor configuration. #856
+- FIXED: Multi column filter is broken for Postgresql #855
+- ADDED: Do not display internal timescaledb objects in postgres databases #839
+- FIXED: When in splitview mode and Clicking "Refresh" button on the right side, will refresh the left side, and not the right side #810
+- FIXED: Cannot filter by uuid field in psql #538
+
+### 5.3.1
+- FIXED: Column sorting on query tab not working #819
+- FIXED: Postgres Connection stays in "Loading database structure" until reloading the page #826
+- FIXED: Cannot read properties of undefined (reading 'length') on Tables #824
+- FIXED: Redshift doesn't show tables when connected #816
+
+### 5.3.0
+- CHANGED: New Oracle driver, much better Oracle support. Works now also in docker distribution
+- FIXED: Connection to oracle with service name #809
+- ADDED: Connect to redis using a custom username #807
+- FIXED: Unable to open SQL files #797
+- FIXED: MongoDB query without columns #811
+- ADDED: Switch connection for opened file #814
+
+### 5.2.9
+- FIXED: PostgresSQL doesn't show tables when connected #793 #805
+- FIXED: MongoDB write operations fail #798 #802
+- FIXED: Elecrron app logging losed most of log messages
+- FIXED: Connection error with SSH tunnel 
+- ADDED: option to disable autoupgrades (with --disable-auto-upgrade)
+- ADDED: Send error context to github gist
+
+### 5.2.8
+- FIXED: file menu save and save as not working
+- FIXED: query editor on import/export screen overlaps with selector
+- FIXED: Fixed inconsistencies in max/unmaximize window buttons
+- FIXED: shortcut for select all 
+- FIXED: download with auth header
+- CHANGED: Upgraded database drivers for mysql, postgres, sqlite, mssql, mongo, redis
+- CHANGED: Upgraded electron version (now using v30)
+- ADDED: Vim keyboard bindings for editor
+- FIXED: Correctly select the save folder for dump
+- ADDED: enum + set for mysql (#693)
+- FIXED: localStorageGabageCollector not working
+- FIXED: Encoding error when opening Unicode query files
+- ADDED: Add copy/paste to query tab and database list
+- ADDED: Add copy name to table list
+- FIXED: Make TabControl scrollable (#730)
+- ADDED: Add copy to column list
+- FIXED: Problems with SQLite + glibc in docker containers
+- ADDED: Button for discard/reset changes (#759)
+- FIXED: Don't show error dialog when subprocess fails, as DbGate handles this correctly (#751, #746, #542, #272)
+
+
+### 5.2.7
+- FIXED: fix body overflow when context menu height great than viewport #592
+- FIXED: Pass signals in entrypoint.sh #596
+- FIXED: Remove missing links to jenasoft #625
+- FIXED: add API headers on upload call #627
+- FIXED: Disabled shell scripting for NPM distribution by default
+- FIXED: Fixed data import from files #633
+- FIXED: Fixed showing GPS positions #575
+- CHANGED: Improved stability of electron client on Windows and Mac (fewer EPIPE errors)
+
+### 5.2.6
+- FIXED: DbGate creates a lot of .tmp.node files in the temp directory #561
+- FIXED: Typo in datetimeoffset dataType #556
+- FIXED: SQL export is using the wrong hour formatting #537
+- FIXED: Missing toolstrip and adds up to 200% zoom to diagram view #524
+- FIXED: MongoDB password could contain special characters #560
+
+### 5.2.5
+- ADDED: Split Windows #394
+- FIXED: Postgres index asc/desc #514
+- FIXED: Excel export not working since 5.2.3 #511
+- ADDED: Include macOS specific app icon #494
+- FIXED: Resizing window resets window contents #479
+- FIXED: Solved some minor problems with widget collapsing
+
+### 5.2.4
+- FIXED: npm version crash (#508)
+
+### 5.2.3
+- ADDED: Search entire table (multi column filter) #491
+- ADDED: OracleDB - connection to toher than default ports #496
+- CHANGED: OracleDB - status of support set to experimental
+- FIXED: OracleDB database URL - fixes: Connect to default Oracle database #489
+- ADDED: HTML, XML code highlighting for Edit cell value #485
+- FIXED: Intellisense - incorrect alias after ORDER BY clause #484
+- FIXED: Typo in SQL-Generator #481
+- ADDED: Data duplicator #480
+- FIXED: MongoDB - support for views #476
+- FIXED: "SQL:CREATE TABLE" generated SQL default value syntax errors #455
+- FIXED: Crash when right-clicking on tables #452
+- FIXED: View sort #436
+- ADDED: Arm64 version for Windows #473
+- ADDED: Sortable query results and data archive
+- CHANGED: Use transactions for saving table data
+- CHANGED: Save table structure uses transactions
+- ADDED: Table data editing - shows editing mark
+- ADDED: Editing data archive files
+- FIXED: Delete cascade options when using more than 2 tables
+- ADDED: Save to current archive commands
+- ADDED: Current archive mark is on status bar
+- FIXED: Changed package used for parsing JSONL files when browsing - fixes backend freezing
+- FIXED: SSL option for mongodb #504
+- REMOVED: Data sheet editor
+- FIXED: Creating SQLite autoincrement column
+- FIXED: Better error reporting from exports/import/dulicator
+- CHANGED: Optimalizede OracleDB analysing algorithm
+- ADDED: Multi column filter for perspectives
+- FIXED: Fixed some scenarios using tables from different DBs
+- FIXED: Sessions with long-running queries are not killed
+
+
+### 5.2.2
+- FIXED: Optimalized load DB structure for PostgreSQL #451
+- ADDED: Auto-closing query connections after configurable (15 minutes default) no-activity interval #468
+- ADDED: Set application-name connection parameter (for PostgreSQL and MS SQL) for easier identifying of DbGate connections
+- ADDED: Filters supports binary IDs #467
+- FIXED: Ctrl+Tab works (switching tabs) #457
+- FIXED: Format code supports non-standard letters #450
+- ADDED: New logging system, log to file, ability to reduce logging #360 (using https://www.npmjs.com/package/pinomin)
+- FIXED: crash on Windows and Mac after system goes in suspend mode #458
+- ADDED: dbmodel standalone NPM package (https://www.npmjs.com/package/dbmodel) - deploy database via commandline tool
+
+
+### 5.2.1
+- FIXED: client_id param in OAuth
+- ADDED: OAuth scope parameter
+- FIXED: login page - password was not sent, when submitting by pressing ENTER
+- FIXED: Used permissions fix
+- FIXED: Export modal - fixed crash when selecting different database
+
+### 5.2.0
+- ADDED: Oracle database support #380
+- ADDED: OAuth authentification #407
+- ADDED: Active directory (Windows) authentification #261
+- ADDED: Ask database credentials when login to DB
+- ADDED: Login form instead of simple authorization (simple auth is possible with special configuration)
+- FIXED: MongoDB - connection uri regression
+- ADDED: MongoDB server summary tab
+- FIXED: Broken versioned tables in MariaDB #433
+- CHANGED: Improved editor margin #422
+- ADDED: Implemented camel case search in all search boxes
+- ADDED: MonhoDB filter empty array, not empty array
+- ADDED: Maximize button reflects window state
+- ADDED: MongoDB - database profiler
+- CHANGED: Short JSON values are shown directly in grid
+- FIXED: Fixed filtering nested fields in NDJSON viewer
+- CHANGED: Improved fuzzy search after Ctrl+P #246
+- ADDED: MongoDB: Create collection backup
+- ADDED: Single database mode
+- ADDED: Perspective designer supports joins from MongoDB nested documents and arrays
+- FIXED: Perspective designer joins on MongoDB ObjectId fields
+- ADDED: Filtering columns in designer (query designer, diagram designer, perspective designer)
+- FIXED: Clone MongoDB rows without _id attribute #404
+- CHANGED: Improved cell view with GPS latitude, longitude fields
+- ADDED: SQL: ALTER VIEW and SQL:ALTER PROCEDURE scripts
+- ADDED: Ctrl+F5 refreshes data grid also with database structure #428
+- ADDED: Perspective display modes: text, force text #439
+- FIXED: Fixed file filters #445
+- ADDED: Rename, remove connection folder, memoize opened state after app restart #425
+- FIXED: Show SQLServer alter store procedure #435
+
+
+### 5.1.6
+- ADDED: Connection folders support #274
+- ADDED: Keyboard shortcut to hide result window and show/hide the side toolbar #406
+- ADDED: Ability to show/hide query results #406
+- FIXED: Double click does not maximize window on MacOS #416
+- FIXED: Some perspective rendering errors
+- FIXED: Connection to MongoDB via database URL info SSH tunnel is used
+- CHANGED: Updated windows code signing certificate
+- ADDED: Query session cleanup (kill query sessions, if browser tab is closed)
+- CHANGED: More strict timeouts to kill database and server connections (reduces resource consumption)
+
+### 5.1.5
+- ADDED: Support perspectives for MongoDB - MongoDB query designer
+- ADDED: Show JSON content directly in the overview #395
+- CHANGED: OSX Command H shortcut for hiding window #390
+- ADDED: Uppercase Autocomplete Suggestions #389
+- FIXED: Record view left/right arrows cause start record number to be treated as string #388
+- FIXED: MongoDb ObjectId behaviour not consistent in nested objects #387
+- FIXED: demo.dbgate.org - beta version crash 5.1.5-beta.3 #386
+- ADDED: connect via socket - configurable via environment variables #358
+
+### 5.1.4
+- ADDED: Drop database commands #384
+- ADDED: Customizable Redis key separator #379
+- ADDED: ARM support for docker images
+- ADDED: Version tags for docker images
+- ADDED: Better SQL command splitting and highlighting
+- ADDED: Unsaved marker for SQL files
+
+### 5.1.3
+- ADDED: Editing multiline cell values #378 #371 #359
+- ADDED: Truncate table #333
+- ADDED: Perspectives - show row count
+- ADDED: Query - error markers in gutter area
+- ADDED: Query - ability to execute query elements from gutter
+- FIXED: Correct error line numbers returned from queries
+
+### 5.1.2
+- FIXED: MongoDb any export function does not work. #373
+- ADDED: Query Designer short order more flexibility #372
+- ADDED: Form View move between records #370
+- ADDED: Custom SQL conditions in query designer and table filtering #369
+- ADDED: Query Designer filter eq to X or IS NULL #368
+- FIXED: Query designer, open a saved query lost sort order #363
+- ADDED: Query designer reorder columns #362
+- ADDED: connect via socket #358
+- FIXED: Show affected rows after UPDATE/DELETE/INSERT #361
+- ADDED: Perspective cell formatters - JSON, image
+- ADDED: Perspectives - cells without joined data are gray
+
+### 5.1.1
+- ADDED: Perspective designer
+- FIXED: NULL,NOT NULL filter datatime columns #356
+- FIXED: Recognize computed columns on SQL server #354
+- ADDED: Hotkey for clear filter #352
+- FIXED: Change column type on Postgres #350
+- ADDED: Ability to open qdesign file #349
+- ADDED: Custom editor font size #345
+- ADDED: Ability to open perspective files
+
+
+### 5.1.0
+- ADDED: Perspectives (docs: https://dbgate.org/docs/perspectives.html )
+- CHANGED: Upgraded SQLite engine version (driver better-sqlite3: 7.6.2)
+- CHANGED: Upgraded ElectronJS version (from version 13 to version 17)
+- CHANGED: Upgraded all dependencies with current available minor version updates
+- CHANGED: By default, connect on click #332˝
+- CHANGED: Improved keyboard navigation, when editing table data #331
+- ADDED:  Option to skip Save changes dialog #329
+- FIXED: Unsigned column doesn't work correctly. #324
+- FIXED: Connect to MS SQL with domain user now works also under Linux and Mac #305
+
 ### 5.0.9
 - FIXED: Fixed problem with SSE events on web version
 - ADDED: Added menu command "New query designer"

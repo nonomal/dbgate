@@ -3,7 +3,7 @@
     createGridCache,
     createGridConfig,
     runMacroOnChangeSet,
-    TableFormViewDisplay,
+    // TableFormViewDisplay,
     TableGridDisplay,
   } from 'dbgate-datalib';
   import { getFilterValueExpression } from 'dbgate-filterparser';
@@ -45,6 +45,8 @@
   export let setCache;
   export let multipleGridsOnTab = false;
 
+  export let isRawMode = false;
+
   $: connection = useConnectionInfo({ conid });
   $: dbinfo = useDatabaseInfo({ conid, database });
   $: serverVersion = useDatabaseServerVersion({ conid, database });
@@ -71,26 +73,27 @@
           { showHintColumns: getBoolSettingsValue('dataGrid.showHintColumns', true) },
           $serverVersion,
           table => getDictionaryDescription(table, conid, database, $apps, $connections),
-          $connection?.isReadOnly
+          $connection?.isReadOnly,
+          isRawMode
         )
       : null;
 
-  $: formDisplay =
-    connection && $serverVersion
-      ? new TableFormViewDisplay(
-          { schemaName, pureName },
-          findEngineDriver($connection, $extensions),
-          config,
-          setConfig,
-          cache,
-          setCache,
-          extendedDbInfo,
-          { showHintColumns: getBoolSettingsValue('dataGrid.showHintColumns', true) },
-          $serverVersion,
-          table => getDictionaryDescription(table, conid, database, $apps, $connections),
-          $connection?.isReadOnly
-        )
-      : null;
+  // $: formDisplay =
+  //   connection && $serverVersion
+  //     ? new TableFormViewDisplay(
+  //         { schemaName, pureName },
+  //         findEngineDriver($connection, $extensions),
+  //         config,
+  //         setConfig,
+  //         cache,
+  //         setCache,
+  //         extendedDbInfo,
+  //         { showHintColumns: getBoolSettingsValue('dataGrid.showHintColumns', true) },
+  //         $serverVersion,
+  //         table => getDictionaryDescription(table, conid, database, $apps, $connections),
+  //         $connection?.isReadOnly
+  //       )
+  //     : null;
 
   const setChildConfig = (value, reference = undefined) => {
     if (_.isFunction(value)) {
@@ -140,7 +143,7 @@
   };
 
   function handleRunMacro(macro, params, cells) {
-    const newChangeSet = runMacroOnChangeSet(macro, params, cells, changeSetState?.value, display);
+    const newChangeSet = runMacroOnChangeSet(macro, params, cells, changeSetState?.value, display, false);
     if (newChangeSet) {
       dispatchChangeSet({ type: 'set', value: newChangeSet });
     }
@@ -157,9 +160,9 @@
       gridCoreComponent={SqlDataGridCore}
       formViewComponent={SqlFormView}
       {display}
-      {formDisplay}
       showReferences
-      showMacros
+      showMacros={!$connection?.isReadOnly}
+      hasMultiColumnFilter
       onRunMacro={handleRunMacro}
       macroCondition={macro => macro.type == 'transformValue'}
       onReferenceSourceChanged={reference ? handleReferenceSourceChanged : null}

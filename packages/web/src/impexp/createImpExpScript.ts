@@ -39,7 +39,10 @@ export function extractShellConnection(connection, database) {
 
   return config.allowShellConnection
     ? {
-        ..._.omit(connection, ['_id', 'displayName', 'databases', 'connectionColor']),
+        ..._.omitBy(
+          _.omit(connection, ['_id', 'displayName', 'databases', 'connectionColor', 'status', 'unsaved']),
+          v => !v
+        ),
         database,
       }
     : {
@@ -161,6 +164,7 @@ function getTargetExpr(extensions, sourceName, values, targetConnection, targetD
         pureName: getTargetName(extensions, sourceName, values),
         ...extractDriverApiParameters(values, 'target', targetDriver),
         ...getFlagsFroAction(values[`actionType_${sourceName}`]),
+        progressName: sourceName,
       },
     ];
   }
@@ -192,7 +196,7 @@ export function normalizeExportColumnMap(colmap) {
   return null;
 }
 
-export default async function createImpExpScript(extensions, values, addEditorInfo = true, forceScript = false) {
+export default async function createImpExpScript(extensions, values, forceScript = false) {
   const config = getCurrentConfig();
   const script =
     config.allowShellScripting || forceScript
@@ -230,12 +234,8 @@ export default async function createImpExpScript(extensions, values, addEditorIn
       script.assignValue(colmapVar, colmap);
     }
 
-    script.copyStream(sourceVar, targetVar, colmapVar);
+    script.copyStream(sourceVar, targetVar, colmapVar, sourceName);
     script.endLine();
-  }
-  if (addEditorInfo) {
-    script.comment('@ImportExportConfigurator');
-    script.comment(JSON.stringify(values));
   }
   return script.getScript(values.schedule);
 }

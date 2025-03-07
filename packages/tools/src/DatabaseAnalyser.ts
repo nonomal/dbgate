@@ -1,10 +1,25 @@
-import { DatabaseInfo, DatabaseModification, EngineDriver, SqlDialect } from 'dbgate-types';
+import { DatabaseHandle, DatabaseInfo, DatabaseModification, EngineDriver, SqlDialect } from 'dbgate-types';
 import _sortBy from 'lodash/sortBy';
 import _groupBy from 'lodash/groupBy';
 import _pick from 'lodash/pick';
 import _compact from 'lodash/compact';
+import { getLogger } from './getLogger';
+import { type Logger } from 'pinomin';
+import { dbNameLogCategory, isCompositeDbName, splitCompositeDbName } from './schemaInfoTools';
+import { extractErrorLogData } from './stringTools';
 
-const STRUCTURE_FIELDS = ['tables', 'collections', 'views', 'matviews', 'functions', 'procedures', 'triggers'];
+const logger = getLogger('dbAnalyser');
+
+const STRUCTURE_FIELDS = [
+  'tables',
+  'collections',
+  'views',
+  'matviews',
+  'functions',
+  'procedures',
+  'triggers',
+  'schedulerEvents',
+];
 
 const fp_pick = arg => array => _pick(array, arg);
 
@@ -34,9 +49,11 @@ export class DatabaseAnalyser {
   singleObjectFilter: any;
   singleObjectId: string = null;
   dialect: SqlDialect;
+  logger: Logger;
 
-  constructor(public pool, public driver: EngineDriver, version) {
+  constructor(public dbhan: DatabaseHandle, public driver: EngineDriver, version) {
     this.dialect = (driver?.dialectByVersion && driver?.dialectByVersion(version)) || driver?.dialect;
+    this.logger = logger;
   }
 
   async _runAnalysis() {
@@ -62,6 +79,9 @@ export class DatabaseAnalyser {
   }
 
   async fullAnalysis() {
+    logger.debug(
+      `Performing full analysis, DB=${dbNameLogCategory(this.dbhan.database)}, engine=${this.driver.engine}`
+    );
     const res = this.addEngineField(await this._runAnalysis());
     // console.log('FULL ANALYSIS', res);
     return res;
@@ -82,6 +102,9 @@ export class DatabaseAnalyser {
   }
 
   async incrementalAnalysis(structure) {
+    logger.info(
+      `Performing incremental analysis, DB=${dbNameLogCategory(this.dbhan.database)}, engine=${this.driver.engine}`
+    );
     this.structure = structure;
 
     const modifications = await this.getModifications();
@@ -107,7 +130,7 @@ export class DatabaseAnalyser {
 
     this.modifications = structureModifications;
     if (structureWithRowCounts) this.structure = structureWithRowCounts;
-    console.log('DB modifications detected:', this.modifications);
+    logger.info({ modifications: this.modifications }, 'DB modifications detected:');
     return this.addEngineField(this.mergeAnalyseResult(await this._runAnalysis()));
   }
 
@@ -170,12 +193,30 @@ export class DatabaseAnalyser {
   //   return this.structure.tables.find((x) => x.objectId == id);
   // }
 
-  containsObjectIdCondition(typeFields) {
-    return this.createQueryCore('=OBJECT_ID_CONDITION', typeFields) != ' is not null';
+  // containsObjectIdCondition(typeFields) {
+  //   return this.createQueryCore('=OBJECT_ID_CONDITION', typeFields) != ' is not null';
+  // }
+
+  getDefaultSchemaNameCondition() {
+    return 'is not null';
   }
 
-  createQuery(template, typeFields) {
-    return this.createQueryCore(template, typeFields);
+  createQuery(template, typeFields, replacements = {}) {
+    let query = this.createQueryCore(this.processQueryReplacements(template, replacements), typeFields);
+
+    const dbname = this.dbhan.database;
+    const schemaCondition = isCompositeDbName(dbname)
+      ? `= '${splitCompositeDbName(dbname).schema}' `
+      : ` ${this.getDefaultSchemaNameCondition()} `;
+
+    return query?.replace(/=SCHEMA_NAME_CONDITION/g, schemaCondition);
+  }
+
+  processQueryReplacements(query, replacements) {
+    for (const repl in replacements) {
+      query = query.replaceAll(repl, replacements[repl]);
+    }
+    return query;
   }
 
   createQueryCore(template, typeFields) {
@@ -197,7 +238,7 @@ export class DatabaseAnalyser {
       .filter(x => typeFields.includes(x.objectTypeField) && (x.action == 'add' || x.action == 'change'))
       .map(x => x.objectId);
     if (filterIds.length == 0) {
-      return template.replace(/=OBJECT_ID_CONDITION/g, " = '0'");
+      return null;
     }
     return template.replace(/=OBJECT_ID_CONDITION/g, ` in (${filterIds.map(x => `'${x}'`).join(',')})`);
   }
@@ -225,12 +266,16 @@ export class DatabaseAnalyser {
       ...this.getDeletedObjectsForField(snapshot, 'procedures'),
       ...this.getDeletedObjectsForField(snapshot, 'functions'),
       ...this.getDeletedObjectsForField(snapshot, 'triggers'),
+      ...this.getDeletedObjectsForField(snapshot, 'schedulerEvents'),
     ];
   }
 
   feedback(obj) {
-    if (this.pool.feedback) {
-      this.pool.feedback(obj);
+    if (this.dbhan.feedback) {
+      this.dbhan.feedback(obj);
+    }
+    if (obj && obj.analysingMessage) {
+      logger.debug(obj.analysingMessage);
     }
   }
 
@@ -293,11 +338,20 @@ export class DatabaseAnalyser {
     return [..._compact(res), ...this.getDeletedObjects(snapshot)];
   }
 
-  async safeQuery(sql) {
+  async analyserQuery(template, typeFields, replacements = {}) {
+    const sql = this.createQuery(template, typeFields, replacements);
+
+    if (!sql) {
+      return {
+        rows: [],
+      };
+    }
     try {
-      return await this.driver.query(this.pool, sql);
+      const res = await this.driver.query(this.dbhan, sql);
+      this.logger.debug({ rows: res.rows.length, template }, `Loaded analyser query`);
+      return res;
     } catch (err) {
-      console.log('Error running analyser query', err.message);
+      logger.error(extractErrorLogData(err, { template }), 'Error running analyser query');
       return {
         rows: [],
       };
@@ -313,12 +367,12 @@ export class DatabaseAnalyser {
       functions: [],
       procedures: [],
       triggers: [],
-      schemas: [],
+      schedulerEvents: [],
     };
   }
 
   static byTableFilter(table) {
-    return x => x.pureName == table.pureName && x.schemaName == x.schemaName;
+    return x => x.pureName == table.pureName && x.schemaName == table.schemaName;
   }
 
   static extractPrimaryKeys(table, pkColumns) {

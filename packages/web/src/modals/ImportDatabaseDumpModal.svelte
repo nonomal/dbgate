@@ -9,12 +9,12 @@
   import { currentDropDownMenu } from '../stores';
   import { apiCall } from '../utility/api';
   import { importSqlDump } from '../utility/exportFileTools';
-  import getConnectionLabel from '../utility/getConnectionLabel';
   import getElectron from '../utility/getElectron';
   import { setUploadListener } from '../utility/uploadFiles';
   import ChangeDownloadUrlModal from './ChangeDownloadUrlModal.svelte';
   import ModalBase from './ModalBase.svelte';
   import { closeCurrentModal, showModal } from './modalTools';
+  import { getConnectionLabel } from 'dbgate-tools';
 
   export let connection;
 
@@ -58,7 +58,7 @@
     const files = await electron.showOpenDialog({
       properties: ['openFile'],
       filters: [
-        { name: 'SQL Files', extensions: ['*.sql'] },
+        { name: 'SQL Files', extensions: ['sql'] },
         { name: 'All Files', extensions: ['*'] },
       ],
     });
@@ -113,8 +113,18 @@
     </div>
 
     <svelte:fragment slot="footer">
-      <FormSubmit value="Run import" on:click={e => handleSubmit(e.detail)} disabled={!inputFile} />
-      <FormStyledButton type="button" value="Cancel" on:click={closeCurrentModal} />
+      <FormSubmit
+        value="Run import"
+        on:click={e => handleSubmit(e.detail)}
+        disabled={!inputFile}
+        data-testid="ImportDatabaseDumpModal_runImport"
+      />
+      <FormStyledButton
+        type="button"
+        value="Cancel"
+        on:click={closeCurrentModal}
+        data-testid="ImportDatabaseDumpModal_cancel"
+      />
     </svelte:fragment>
   </ModalBase>
 </FormProvider>

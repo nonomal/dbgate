@@ -36,7 +36,7 @@
     category: 'Data grid',
     name: 'Toggle left panel',
     keyText: 'CtrlOrCommand+L',
-    testEnabled: () => getCurrentEditor() != null,
+    testEnabled: () => getCurrentEditor()?.canShowLeftPanel(),
     onClick: () => getCurrentEditor().toggleLeftPanel(),
   });
 
@@ -57,14 +57,12 @@
   import HorizontalSplitter from '../elements/HorizontalSplitter.svelte';
   import VerticalSplitter from '../elements/VerticalSplitter.svelte';
   import FormViewFilters from '../formview/FormViewFilters.svelte';
-  import MacroDetail from '../freetable/MacroDetail.svelte';
-  import MacroManager from '../freetable/MacroManager.svelte';
+  import MacroDetail from '../macro/MacroDetail.svelte';
+  import MacroManager from '../macro/MacroManager.svelte';
   import WidgetColumnBar from '../widgets/WidgetColumnBar.svelte';
   import WidgetColumnBarItem from '../widgets/WidgetColumnBarItem.svelte';
   import ColumnManager from './ColumnManager.svelte';
   import ReferenceManager from './ReferenceManager.svelte';
-  import FreeTableColumnEditor from '../freetable/FreeTableColumnEditor.svelte';
-  import JsonViewFilters from '../jsonview/JsonViewFilters.svelte';
   import createActivator, { getActiveComponent } from '../utility/createActivator';
   import _ from 'lodash';
   import registerCommand from '../commands/registerCommand';
@@ -76,26 +74,29 @@
   export let gridCoreComponent;
   export let formViewComponent = null;
   export let jsonViewComponent = null;
-  export let formDisplay;
+  // export let formDisplay;
   export let display;
   export let changeSetState;
   export let dispatchChangeSet;
-  export let useEvalFilters = false;
 
   export let isDetailView = false;
   export let showReferences = false;
   export let showMacros = false;
   export let expandMacros = false;
-  export let freeTableColumn = false;
   export let isDynamicStructure = false;
   export let macroCondition;
   export let onRunMacro;
+  export let hasMultiColumnFilter = false;
+  export let setLoadedRows = null;
+  export let hideGridLeftColumn = false;
 
-  export let loadedRows;
+  export let onPublishedCellsChanged;
+
+  let loadedRows;
+  let publishedCells = [];
 
   export const activator = createActivator('DataGrid', false);
 
-  let selectedCellsPublished = () => [];
   let domColumnManager;
 
   const selectedMacro = writable(null);
@@ -107,23 +108,23 @@
   const collapsedLeftColumnStore =
     getContext('collapsedLeftColumnStore') || writable(getLocalStorage('dataGrid_collapsedLeftColumn', false));
 
-  $: isFormView = !!(formDisplay && formDisplay.config && formDisplay.config.isFormView);
+  $: isFormView = !!config?.isFormView;
   $: isJsonView = !!config?.isJsonView;
 
   const handleExecuteMacro = () => {
-    onRunMacro($selectedMacro, extractMacroValuesForMacro($macroValues, $selectedMacro), selectedCellsPublished());
+    onRunMacro($selectedMacro, extractMacroValuesForMacro($macroValues, $selectedMacro), publishedCells);
     $selectedMacro = null;
   };
 
   export function switchViewEnabled(view) {
-    if (view == 'form') return !!formViewComponent && !!formDisplay && !isFormView && display?.baseTable?.primaryKey;
+    if (view == 'form') return !!formViewComponent && !isFormView;
     if (view == 'table') return !!(isFormView || isJsonView);
     if (view == 'json') return !!jsonViewComponent && !isJsonView;
   }
 
   export function switchToView(view) {
     if (view == 'form') {
-      display.switchToFormView(selectedCellsPublished()[0]?.rowData);
+      display.switchToFormView(publishedCells[0]?.row);
     }
     if (view == 'table') {
       setConfig(cfg => ({
@@ -138,6 +139,10 @@
     }
   }
 
+  export function canShowLeftPanel() {
+    return !hideGridLeftColumn;
+  }
+
   export function toggleLeftPanel() {
     collapsedLeftColumnStore.update(x => !x);
   }
@@ -146,7 +151,7 @@
     { command: 'dataGrid.switchToForm', tag: 'switch', hideDisabled: true },
     { command: 'dataGrid.switchToTable', tag: 'switch', hideDisabled: true },
     { command: 'dataGrid.switchToJson', tag: 'switch', hideDisabled: true },
-    { command: 'dataGrid.toggleLeftPanel', tag: 'switch' }
+    { command: 'dataGrid.toggleLeftPanel', tag: 'switch', hideDisabled: true }
   );
 
   $: if (managerSize) setLocalStorage('dataGridManagerWidth', managerSize);
@@ -163,7 +168,7 @@
 <HorizontalSplitter
   initialValue={getInitialManagerSize()}
   bind:size={managerSize}
-  hideFirst={$collapsedLeftColumnStore}
+  hideFirst={hideGridLeftColumn || $collapsedLeftColumnStore}
 >
   <div class="left" slot="1">
     <WidgetColumnBar>
@@ -171,41 +176,28 @@
         title="Columns"
         name="columns"
         height="45%"
-        show={(!freeTableColumn || isDynamicStructure) && !isFormView}
+        skip={isFormView}
+        data-testid="DataGrid_itemColumns"
       >
         <ColumnManager {...$$props} {managerSize} {isJsonView} {isDynamicStructure} bind:this={domColumnManager} />
       </WidgetColumnBarItem>
 
       <WidgetColumnBarItem
         title="Filters"
-        name="jsonFilters"
-        height={'30%'}
-        skip={!isDynamicStructure || !display?.filterable}
-      >
-        <JsonViewFilters {...$$props} {managerSize} {isDynamicStructure} {useEvalFilters} />
-      </WidgetColumnBarItem>
-
-      <WidgetColumnBarItem
-        title="Filters"
-        name="tableFilters"
-        height={'15%'}
-        skip={!display?.filterable || isDynamicStructure || display.filterCount == 0 || isFormView}
+        name="filters"
+        height={showReferences && display?.hasReferences && !isFormView ? '15%' : '30%'}
+        skip={!display?.filterable}
         collapsed={isDetailView}
+        data-testid="DataGrid_itemFilters"
       >
-        <JsonViewFilters {...$$props} {managerSize} {isDynamicStructure} {useEvalFilters} />
-      </WidgetColumnBarItem>
-
-      <WidgetColumnBarItem
-        title="Columns"
-        name="freeColumns"
-        height="40%"
-        show={freeTableColumn && !isDynamicStructure}
-      >
-        <FreeTableColumnEditor {...$$props} {managerSize} />
-      </WidgetColumnBarItem>
-
-      <WidgetColumnBarItem title="Filters" name="filters" height="30%" show={isFormView}>
-        <FormViewFilters {...$$props} {managerSize} driver={formDisplay?.driver} />
+        <FormViewFilters
+          {...$$props}
+          {managerSize}
+          {isDynamicStructure}
+          {isFormView}
+          {hasMultiColumnFilter}
+          driver={display?.driver}
+        />
       </WidgetColumnBarItem>
 
       <WidgetColumnBarItem
@@ -213,12 +205,19 @@
         name="references"
         height="30%"
         collapsed={isDetailView}
-        show={showReferences && display?.hasReferences}
+        skip={!(showReferences && display?.hasReferences)}
+        data-testid="DataGrid_itemReferences"
       >
         <ReferenceManager {...$$props} {managerSize} />
       </WidgetColumnBarItem>
 
-      <WidgetColumnBarItem title="Macros" name="macros" skip={!showMacros} collapsed={!expandMacros}>
+      <WidgetColumnBarItem
+        title="Macros"
+        name="macros"
+        skip={!showMacros}
+        collapsed={!expandMacros}
+        data-testid="DataGrid_itemMacros"
+      >
         <MacroManager {...$$props} {managerSize} />
       </WidgetColumnBarItem>
     </WidgetColumnBar>
@@ -229,17 +228,22 @@
         {#if isFormView}
           <svelte:component this={formViewComponent} {...$$props} />
         {:else if isJsonView}
-          <svelte:component this={jsonViewComponent} {...$$props} bind:loadedRows />
+          <svelte:component this={jsonViewComponent} {...$$props} {setLoadedRows} />
         {:else}
           <svelte:component
             this={gridCoreComponent}
             {...$$props}
             {collapsedLeftColumnStore}
-            formViewAvailable={!!formViewComponent && !!formDisplay}
+            formViewAvailable={!!formViewComponent}
             macroValues={extractMacroValuesForMacro($macroValues, $selectedMacro)}
             macroPreview={$selectedMacro}
-            bind:loadedRows
-            bind:selectedCellsPublished
+            {setLoadedRows}
+            onPublishedCellsChanged={value => {
+              publishedCells = value;
+              if (onPublishedCellsChanged) {
+                onPublishedCellsChanged(value);
+              }
+            }}
             onChangeSelectedColumns={cols => {
               if (domColumnManager) domColumnManager.setSelectedColumns(cols);
             }}

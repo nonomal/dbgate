@@ -67,14 +67,19 @@
     </svelte:fragment>
 
     <div class="messages">
-      <SocketMessageView eventName={runid ? `runner-info-${runid}` : null} {executeNumber} showNoMessagesAlert />
+      <SocketMessageView
+        eventName={runid ? `runner-info-${runid}` : null}
+        {executeNumber}
+        showNoMessagesAlert
+        showCaller
+      />
     </div>
 
     <svelte:fragment slot="footer">
       {#if isRunning}
-        <FormStyledButton value="Stop" on:click={handleStop} />
+        <FormStyledButton value="Stop" on:click={handleStop} data-testid="RunScriptModal_stop" />
       {:else}
-        <FormStyledButton value="Close" on:click={handleClose} />
+        <FormStyledButton value="Close" on:click={handleClose} data-testid="RunScriptModal_close" />
       {/if}
 
       {#if onOpenResult && !isRunning}

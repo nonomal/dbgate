@@ -19,21 +19,32 @@
     onClick: () => getCurrentEditor().exportGrid(),
   });
 
-  function buildGridMongoCondition(props) {
+  function buildConditionForGrid(props) {
     const filters = props?.display?.config?.filters;
+    const filterBehaviour =
+      props?.display?.driver?.getFilterBehaviour(null, standardFilterBehaviours) ?? mongoFilterBehaviour;
+
+    // console.log('USED FILTER BEHAVIOUR', filterBehaviour);
 
     const conditions = [];
     for (const uniqueName in filters || {}) {
       if (!filters[uniqueName]) continue;
       try {
-        const ast = parseFilter(filters[uniqueName], 'mongo');
+        const ast = parseFilter(filters[uniqueName], filterBehaviour);
         // console.log('AST', ast);
         const cond = _.cloneDeepWith(ast, expr => {
-          if (expr.__placeholder__) {
+          if (expr.exprType == 'placeholder') {
             return {
-              [uniqueName]: expr.__placeholder__,
+              exprType: 'column',
+              columnName: uniqueName,
             };
           }
+
+          // if (expr.__placeholder__) {
+          //   return {
+          //     [uniqueName]: expr.__placeholder__,
+          //   };
+          // }
         });
         conditions.push(cond);
       } catch (err) {
@@ -43,19 +54,20 @@
 
     return conditions.length > 0
       ? {
-          $and: conditions,
+          conditionType: 'and',
+          conditions,
         }
       : undefined;
   }
 
-  function buildMongoSort(props) {
+  function buildSortForGrid(props) {
     const sort = props?.display?.config?.sort;
 
     if (sort?.length > 0) {
-      return _.zipObject(
-        sort.map(col => col.uniqueName),
-        sort.map(col => (col.order == 'DESC' ? -1 : 1))
-      );
+      return sort.map(col => ({
+        columnName: col.uniqueName,
+        direction: col.order,
+      }));
     }
 
     return null;
@@ -71,8 +83,8 @@
         pureName: props.pureName,
         limit,
         skip: offset,
-        condition: buildGridMongoCondition(props),
-        sort: buildMongoSort(props),
+        condition: buildConditionForGrid(props),
+        sort: buildSortForGrid(props),
       },
     });
 
@@ -96,7 +108,7 @@
       options: {
         pureName: props.pureName,
         countDocuments: true,
-        condition: buildGridMongoCondition(props),
+        condition: buildConditionForGrid(props),
       },
     });
 
@@ -105,19 +117,11 @@
 </script>
 
 <script lang="ts">
-  import { changeSetToSql, createChangeSet } from 'dbgate-datalib';
   import { parseFilter } from 'dbgate-filterparser';
-  import { scriptToSql } from 'dbgate-sqltree';
   import _ from 'lodash';
   import { registerQuickExportHandler } from '../buttons/ToolStripExportButton.svelte';
   import registerCommand from '../commands/registerCommand';
-  import ErrorInfo from '../elements/ErrorInfo.svelte';
   import { extractShellConnection } from '../impexp/createImpExpScript';
-  import ConfirmNoSqlModal from '../modals/ConfirmNoSqlModal.svelte';
-  import ErrorMessageModal from '../modals/ErrorMessageModal.svelte';
-  import ImportExportModal from '../modals/ImportExportModal.svelte';
-  import { showModal } from '../modals/modalTools';
-  import { extensions } from '../stores';
   import { apiCall } from '../utility/api';
 
   import { registerMenu } from '../utility/contextMenu';
@@ -129,6 +133,8 @@
   import ChangeSetGrider from './ChangeSetGrider';
 
   import LoadingDataGridCore from './LoadingDataGridCore.svelte';
+  import { mongoFilterBehaviour, standardFilterBehaviours } from 'dbgate-tools';
+  import { openImportExportTab } from '../utility/importExportTools';
 
   export let conid;
   export let display;
@@ -141,11 +147,13 @@
 
   export let macroPreview;
   export let macroValues;
-  export let selectedCellsPublished;
+  export let setLoadedRows = null;
+  export let onPublishedCellsChanged;
 
   // export let onChangeGrider = undefined;
 
-  export let loadedRows = [];
+  let loadedRows = [];
+  let publishedCells = [];
 
   export const activator = createActivator('CollectionDataGridCore', false);
 
@@ -157,23 +165,33 @@
     display,
     macroPreview,
     macroValues,
-    selectedCellsPublished()
+    publishedCells
   );
   // $: console.log('GRIDER', grider);
   // $: if (onChangeGrider) onChangeGrider(grider);
 
   function getExportQuery() {
-    return `db.collection('${pureName}')
-      .find(${JSON.stringify(buildGridMongoCondition($$props) || {})})
-      .sort(${JSON.stringify(buildMongoSort($$props) || {})})`;
+    return display?.driver?.getCollectionExportQueryScript?.(
+      pureName,
+      buildConditionForGrid($$props),
+      buildSortForGrid($$props)
+    );
+    // return `db.collection('${pureName}')
+    //   .find(${JSON.stringify(buildConditionForGrid($$props) || {})})
+    //   .sort(${JSON.stringify(buildMongoSort($$props) || {})})`;
   }
 
   function getExportQueryJson() {
-    return {
-      collection: pureName,
-      condition: buildGridMongoCondition($$props) || {},
-      sort: buildMongoSort($$props) || {},
-    };
+    return display?.driver?.getCollectionExportQueryJson?.(
+      pureName,
+      buildConditionForGrid($$props),
+      buildSortForGrid($$props)
+    );
+    // return {
+    //   collection: pureName,
+    //   condition: buildConditionForGrid($$props) || {},
+    //   sort: buildMongoSort($$props) || {},
+    // };
   }
 
   export async function exportGrid() {
@@ -188,7 +206,8 @@
     initialValues.sourceQueryType = coninfo.isReadOnly ? 'json' : 'native';
     initialValues.sourceList = [pureName];
     initialValues[`columns_${pureName}`] = display.getExportColumnMap();
-    showModal(ImportExportModal, { initialValues });
+    openImportExportTab(initialValues);
+    // showModal(ImportExportModal, { initialValues });
   }
 
   export function openQuery() {
@@ -197,6 +216,7 @@
         title: 'Query #',
         icon: 'img sql-file',
         tabComponent: 'QueryTab',
+        focused: true,
         props: {
           conid,
           database,
@@ -227,10 +247,20 @@
 
   registerQuickExportHandler(quickExportHandler);
 
-  registerMenu({ command: 'collectionDataGrid.openQuery', tag: 'export' }, () => ({
-    ...createQuickExportMenu(quickExportHandler, { command: 'collectionDataGrid.export' }),
-    tag: 'export',
-  }));
+  registerMenu({ command: 'collectionDataGrid.openQuery', tag: 'export' }, () =>
+    createQuickExportMenu(
+      quickExportHandler,
+      {
+        command: 'collectionDataGrid.export',
+      },
+      { tag: 'export' }
+    )
+  );
+
+  function handleSetLoadedRows(rows) {
+    loadedRows = rows;
+    if (setLoadedRows) setLoadedRows(rows);
+  }
 </script>
 
 <LoadingDataGridCore
@@ -238,8 +268,14 @@
   loadDataPage={loadCollectionDataPage}
   {dataPageAvailable}
   {loadRowCount}
-  bind:loadedRows
-  bind:selectedCellsPublished
+  setLoadedRows={handleSetLoadedRows}
+  onPublishedCellsChanged={value => {
+    publishedCells = value;
+    if (onPublishedCellsChanged) {
+      onPublishedCellsChanged(value);
+    }
+  }}
   frameSelection={!!macroPreview}
+  onOpenQuery={openQuery}
   {grider}
 />
