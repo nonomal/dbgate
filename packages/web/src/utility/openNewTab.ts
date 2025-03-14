@@ -1,12 +1,13 @@
 import _ from 'lodash';
 import uuidv1 from 'uuid/v1';
-import { get } from 'svelte/store';
-import { getOpenedTabs, openedTabs, TabDefinition } from '../stores';
+import { getActiveTab, getOpenedTabs, openedTabs } from '../stores';
 import tabs from '../tabs';
-import { setSelectedTabFunc } from './common';
+import { setSelectedTabFunc, switchCurrentDatabase } from './common';
 import localforage from 'localforage';
 import stableStringify from 'json-stable-stringify';
 import { saveAllPendingEditorData } from '../query/useEditorData';
+import { getConnectionInfo } from './metadataLoaders';
+import { getBoolSettingsValue } from '../settings/settingsTools';
 
 function findFreeNumber(numbers: number[]) {
   if (numbers.length == 0) return 1;
@@ -16,12 +17,30 @@ function findFreeNumber(numbers: number[]) {
   // return res;
 }
 
-export default async function openNewTab(newTab, initialData = undefined, options = undefined) {
-  const oldTabs = get(openedTabs);
+export default async function openNewTab(newTab, initialData: any = undefined, options: any = undefined) {
+  const oldTabs = getOpenedTabs();
+  const activeTab = getActiveTab();
 
   let existing = null;
 
-  const { savedFile, savedFolder, savedFilePath } = newTab.props || {};
+  if (!getBoolSettingsValue('behaviour.useTabPreviewMode', true) && newTab.tabPreviewMode) {
+    newTab = {
+      ...newTab,
+      tabPreviewMode: false,
+    };
+  }
+
+  const { savedFile, savedFolder, savedFilePath, conid, database } = newTab.props || {};
+
+  if (conid && database) {
+    const connection = await getConnectionInfo({ conid });
+    await switchCurrentDatabase({
+      connection,
+      name: database,
+    });
+  }
+
+  const { tabPreviewMode } = newTab;
   if (savedFile || savedFilePath) {
     existing = oldTabs.find(
       x =>
@@ -49,7 +68,9 @@ export default async function openNewTab(newTab, initialData = undefined, option
   }
 
   if (existing) {
-    openedTabs.update(tabs => setSelectedTabFunc(tabs, existing.tabid));
+    openedTabs.update(tabs =>
+      setSelectedTabFunc(tabs, existing.tabid, !tabPreviewMode ? { tabPreviewMode: false } : {})
+    );
     return;
   }
 
@@ -65,7 +86,7 @@ export default async function openNewTab(newTab, initialData = undefined, option
   const tabid = uuidv1();
   if (initialData) {
     for (const key of _.keys(initialData)) {
-      if (key == 'editor') {
+      if (key == 'editor' || key == 'rows') {
         await localforage.setItem(`tabdata_${key}_${tabid}`, initialData[key]);
       } else {
         localStorage.setItem(`tabdata_${key}_${tabid}`, JSON.stringify(initialData[key]));
@@ -92,12 +113,19 @@ export default async function openNewTab(newTab, initialData = undefined, option
       items.push(newItem);
     }
 
+    const filesFiltered = tabPreviewMode ? (files || []).filter(x => !x.tabPreviewMode) : files;
+
     return [
-      ...(files || []).map(x => ({ ...x, selected: false, tabOrder: _.findIndex(items, y => y.tabid == x.tabid) })),
+      ...(filesFiltered || []).map(x => ({
+        ...x,
+        selected: false,
+        tabOrder: _.findIndex(items, y => y.tabid == x.tabid),
+      })),
       {
         ...newTab,
         tabid,
         selected: true,
+        multiTabIndex: newTab?.multiTabIndex ?? activeTab?.multiTabIndex ?? 0,
         tabOrder: _.findIndex(items, y => y.tabid == tabid),
       },
     ];
@@ -151,6 +179,9 @@ export function getTabDbKey(tab) {
   if (tab.tabComponent == 'ConnectionTab') {
     return 'connections.';
   }
+  if (tab.tabComponent?.startsWith('Admin')) {
+    return 'admin.';
+  }
   if (tab.props && tab.props.conid && tab.props.database) {
     return `database://${tab.props.database}-${tab.props.conid}`;
   }
@@ -178,6 +209,7 @@ export function groupTabs(tabs: any[]) {
       res.push({
         tabDbKey: tab.tabDbKey,
         tabDbName: tab.tabDbName,
+        tabDbServer: tab.tabDbServer,
         tabs: [tab],
         grpid: tab.tabid,
       });

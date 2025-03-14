@@ -21,6 +21,12 @@
       single: true,
     },
     {
+      type: 'jsonExpanded',
+      title: 'Json - expanded',
+      component: JsonExpandedCellView,
+      single: true,
+    },
+    {
       type: 'jsonRow',
       title: 'Json - Row',
       component: JsonRowView,
@@ -39,6 +45,12 @@
       single: false,
     },
     {
+      type: 'xml',
+      title: 'XML',
+      component: XmlCellView,
+      single: false,
+    },
+    {
       type: 'map',
       title: 'Map',
       component: MapCellView,
@@ -47,12 +59,12 @@
   ];
 
   function autodetect(selection) {
-    if (selection[0]?.engine?.databaseEngineTypes?.includes('document')) {
-      return 'jsonRow';
-    }
-
     if (selectionCouldBeShownOnMap(selection)) {
       return 'map';
+    }
+
+    if (selection[0]?.engine?.databaseEngineTypes?.includes('document')) {
+      return 'jsonRow';
     }
 
     const value = selection.length == 1 ? selection[0].value : null;
@@ -61,6 +73,9 @@
     }
     if (_.isPlainObject(value) || _.isArray(value)) {
       return 'json';
+    }
+    if (typeof value === 'string' && value.startsWith('<') && value.endsWith('>')) {
+      return 'xml';
     }
     return 'textWrap';
   }
@@ -80,10 +95,12 @@
   import TextCellViewNoWrap from '../celldata/TextCellViewNoWrap.svelte';
   import TextCellViewWrap from '../celldata/TextCellViewWrap.svelte';
   import ErrorInfo from '../elements/ErrorInfo.svelte';
-  import { selectionCouldBeShownOnMap } from '../elements/MapView.svelte';
+  import { selectionCouldBeShownOnMap } from '../elements/SelectionMapView.svelte';
   import SelectField from '../forms/SelectField.svelte';
   import { selectedCellsCallback } from '../stores';
   import WidgetTitle from './WidgetTitle.svelte';
+  import JsonExpandedCellView from '../celldata/JsonExpandedCellView.svelte';
+  import XmlCellView from '../celldata/XmlCellView.svelte';
 
   let selectedFormatType = 'autodetect';
 
@@ -107,6 +124,7 @@
         isNative
         value={selectedFormatType}
         on:change={e => (selectedFormatType = e.detail)}
+        data-testid="CellDataWidget_selectFormat"
         options={[
           { value: 'autodetect', label: `Autodetect - ${autodetectFormat.title}` },
           ...formats.map(fmt => ({ label: fmt.title, value: fmt.type })),
@@ -138,6 +156,7 @@
     display: flex;
     flex: 1;
     flex-direction: column;
+    position: relative;
   }
 
   .toolbar {

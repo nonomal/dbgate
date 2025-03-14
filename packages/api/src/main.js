@@ -18,20 +18,28 @@ const sessions = require('./controllers/sessions');
 const runners = require('./controllers/runners');
 const jsldata = require('./controllers/jsldata');
 const config = require('./controllers/config');
+const storage = require('./controllers/storage');
 const archive = require('./controllers/archive');
 const apps = require('./controllers/apps');
+const auth = require('./controllers/auth');
 const uploads = require('./controllers/uploads');
 const plugins = require('./controllers/plugins');
 const files = require('./controllers/files');
 const scheduler = require('./controllers/scheduler');
 const queryHistory = require('./controllers/queryHistory');
 const onFinished = require('on-finished');
+const processArgs = require('./utility/processArgs');
 
-const { rundir } = require('./utility/directories');
+const { rundir, filesdir } = require('./utility/directories');
 const platformInfo = require('./utility/platformInfo');
 const getExpressPath = require('./utility/getExpressPath');
-const { getLogins } = require('./utility/hasPermission');
 const _ = require('lodash');
+const { getLogger } = require('dbgate-tools');
+const { getDefaultAuthProvider } = require('./auth/authProvider');
+const startCloudUpgradeTimer = require('./utility/cloudUpgrade');
+const { isProApp } = require('./utility/checkLicense');
+
+const logger = getLogger('main');
 
 function start() {
   // console.log('process.argv', process.argv);
@@ -40,11 +48,23 @@ function start() {
 
   const server = http.createServer(app);
 
-  const logins = getLogins();
-  if (logins) {
+  if (process.env.BASIC_AUTH && !process.env.STORAGE_DATABASE) {
+    async function authorizer(username, password, cb) {
+      try {
+        const resp = await getDefaultAuthProvider().login(username, password);
+        if (resp.accessToken) {
+          cb(null, true);
+        } else {
+          cb(null, false);
+        }
+      } catch (err) {
+        cb(err, false);
+      }
+    }
     app.use(
       basicAuth({
-        users: _.fromPairs(logins.map(x => [x.login, x.password])),
+        authorizer,
+        authorizeAsync: true,
         challenge: true,
         realm: 'DbGate Web App',
       })
@@ -53,7 +73,34 @@ function start() {
 
   app.use(cors());
 
+  if (platformInfo.isDocker) {
+    // server static files inside docker container
+    app.use(getExpressPath('/'), express.static('/home/dbgate-docker/public'));
+  } else if (platformInfo.isAwsUbuntuLayout) {
+    app.use(getExpressPath('/'), express.static('/home/ubuntu/build/public'));
+  } else if (platformInfo.isAzureUbuntuLayout) {
+    app.use(getExpressPath('/'), express.static('/home/azureuser/build/public'));
+  } else if (processArgs.runE2eTests) {
+    app.use(getExpressPath('/'), express.static(path.resolve('packer/build/public')));
+  } else if (platformInfo.isNpmDist) {
+    app.use(
+      getExpressPath('/'),
+      express.static(path.join(__dirname, isProApp() ? '../../dbgate-web-premium/public' : '../../dbgate-web/public'))
+    );
+  } else if (process.env.DEVWEB) {
+    // console.log('__dirname', __dirname);
+    // console.log(path.join(__dirname, '../../web/public/build'));
+    app.use(getExpressPath('/'), express.static(path.join(__dirname, '../../web/public')));
+  } else {
+    app.get(getExpressPath('/'), (req, res) => {
+      res.send('DbGate API');
+    });
+  }
+
+  app.use(auth.authMiddleware);
+
   app.get(getExpressPath('/stream'), async function (req, res) {
+    const strmid = req.query.strmid;
     res.set({
       'Cache-Control': 'no-cache',
       'Content-Type': 'text/event-stream',
@@ -64,9 +111,9 @@ function start() {
 
     // Tell the client to retry every 10 seconds if connectivity is lost
     res.write('retry: 10000\n\n');
-    socket.addSseResponse(res);
+    socket.addSseResponse(res, strmid);
     onFinished(req, () => {
-      socket.removeSseResponse(res);
+      socket.removeSseResponse(strmid);
     });
   });
 
@@ -86,16 +133,21 @@ function start() {
   // }
 
   app.use(getExpressPath('/runners/data'), express.static(rundir()));
+  app.use(getExpressPath('/files/data'), express.static(filesdir()));
 
   if (platformInfo.isDocker) {
-    // server static files inside docker container
-    app.use(getExpressPath('/'), express.static('/home/dbgate-docker/public'));
-
     const port = process.env.PORT || 3000;
-    console.log('DbGate API listening on port (docker build)', port);
+    logger.info(`DbGate API listening on port ${port} (docker build)`);
+    server.listen(port);
+  } else if (platformInfo.isAwsUbuntuLayout) {
+    const port = process.env.PORT || 3000;
+    logger.info(`DbGate API listening on port ${port} (AWS AMI build)`);
+    server.listen(port);
+  } else if (platformInfo.isAzureUbuntuLayout) {
+    const port = process.env.PORT || 3000;
+    logger.info(`DbGate API listening on port ${port} (Azure VM build)`);
     server.listen(port);
   } else if (platformInfo.isNpmDist) {
-    app.use(getExpressPath('/'), express.static(path.join(__dirname, '../../dbgate-web/public')));
     getPort({
       port: parseInt(
         // @ts-ignore
@@ -103,35 +155,27 @@ function start() {
       ),
     }).then(port => {
       server.listen(port, () => {
-        console.log(`DbGate API listening on port ${port} (NPM build)`);
+        logger.info(`DbGate API listening on port ${port} (NPM build)`);
       });
     });
   } else if (process.env.DEVWEB) {
-    console.log('__dirname', __dirname);
-    console.log(path.join(__dirname, '../../web/public/build'));
-    app.use(getExpressPath('/'), express.static(path.join(__dirname, '../../web/public')));
-
     const port = process.env.PORT || 3000;
-    console.log('DbGate API & web listening on port (dev web build)', port);
+    logger.info(`DbGate API & web listening on port ${port} (dev web build)`);
     server.listen(port);
   } else {
-    app.get(getExpressPath('/'), (req, res) => {
-      res.send('DbGate API');
-    });
-
     const port = process.env.PORT || 3000;
-    console.log('DbGate API listening on port (dev API build)', port);
+    logger.info(`DbGate API listening on port ${port} (dev API build)`);
     server.listen(port);
   }
 
   function shutdown() {
-    console.log('\nShutting down DbGate API server');
+    logger.info('\nShutting down DbGate API server');
     server.close(() => {
-      console.log('Server shut down, terminating');
+      logger.info('Server shut down, terminating');
       process.exit(0);
     });
     setTimeout(() => {
-      console.log('Server close timeout, terminating');
+      logger.info('Server close timeout, terminating');
       process.exit(0);
     }, 1000);
   }
@@ -139,6 +183,10 @@ function start() {
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
   process.on('SIGBREAK', shutdown);
+
+  if (process.env.CLOUD_UPGRADE_FILE) {
+    startCloudUpgradeTimer();
+  }
 }
 
 function useAllControllers(app, electron) {
@@ -150,6 +198,7 @@ function useAllControllers(app, electron) {
   useController(app, electron, '/runners', runners);
   useController(app, electron, '/jsldata', jsldata);
   useController(app, electron, '/config', config);
+  useController(app, electron, '/storage', storage);
   useController(app, electron, '/archive', archive);
   useController(app, electron, '/uploads', uploads);
   useController(app, electron, '/plugins', plugins);
@@ -157,6 +206,7 @@ function useAllControllers(app, electron) {
   useController(app, electron, '/scheduler', scheduler);
   useController(app, electron, '/query-history', queryHistory);
   useController(app, electron, '/apps', apps);
+  useController(app, electron, '/auth', auth);
 }
 
 function setElectronSender(electronSender) {

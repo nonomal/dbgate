@@ -25,6 +25,8 @@
   export let driver;
   export let multiselect = false;
   export let jslid;
+  export let formatterFunction;
+  export let dataType;
 
   // console.log('ValueLookupModal', conid, database, pureName, schemaName, columnName, driver);
 
@@ -42,6 +44,7 @@
         jslid,
         search,
         field,
+        formatterFunction,
       });
     } else {
       rows = await apiCall('database-connections/load-field-values', {
@@ -51,6 +54,7 @@
         schemaName,
         pureName,
         field,
+        dataType,
       });
     }
 

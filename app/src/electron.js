@@ -1,6 +1,8 @@
 const electron = require('electron');
 const os = require('os');
 const fs = require('fs');
+// const unhandled = require('electron-unhandled');
+// const { openNewGitHubIssue, debugInfo } = require('electron-util');
 const { Menu, ipcMain } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const log = require('electron-log');
@@ -14,16 +16,40 @@ const BrowserWindow = electron.BrowserWindow;
 const path = require('path');
 const url = require('url');
 const mainMenuDefinition = require('./mainMenuDefinition');
-const { settings } = require('cluster');
+const { isProApp } = require('./proTools');
+const updaterChannel = require('./updaterChannel');
 
 // require('@electron/remote/main').initialize();
 
 const configRootPath = path.join(app.getPath('userData'), 'config-root.json');
+let saveConfigOnExit = true;
 let initialConfig = {};
 let apiLoaded = false;
 let mainModule;
+// let getLogger;
+// let loadLogsContent;
+let appUpdateStatus = '';
+let settingsJson = {};
+
+process.on('uncaughtException', function (error) {
+  console.error('uncaughtException', error);
+});
 
 const isMac = () => os.platform() == 'darwin';
+
+// unhandled({
+//   showDialog: true,
+//   reportButton: error => {
+//     openNewGitHubIssue({
+//       user: 'dbgate',
+//       repo: 'dbgate',
+//       body: `PLEASE DELETE SENSITIVE INFO BEFORE POSTING ISSUE!!!\n\n\`\`\`\n${
+//         error.stack
+//       }\n\`\`\`\n\n---\n\n${debugInfo()}\n\n\`\`\`\n${loadLogsContent ? loadLogsContent(50) : ''}\n\`\`\``,
+//     });
+//   },
+//   logger: error => (getLogger ? getLogger('electron').fatal(error) : console.error(error)),
+// });
 
 try {
   initialConfig = JSON.parse(fs.readFileSync(configRootPath, { encoding: 'utf-8' }));
@@ -40,6 +66,10 @@ let runCommandOnLoad = null;
 
 log.transports.file.level = 'debug';
 autoUpdater.logger = log;
+if (updaterChannel) {
+  autoUpdater.channel = updaterChannel;
+  autoUpdater.allowPrerelease = updaterChannel.includes('beta');
+}
 // TODO - create settings for this
 // appUpdater.channel = 'beta';
 
@@ -78,7 +108,7 @@ function commandItem(item) {
 }
 
 function buildMenu() {
-  let template = _cloneDeepWith(mainMenuDefinition({ editMenu: true }), item => {
+  let template = _cloneDeepWith(mainMenuDefinition({ editMenu: true, isMac: isMac() }), item => {
     if (item.divider) {
       return { type: 'separator' };
     }
@@ -140,6 +170,21 @@ ipcMain.on('quit-app', async (event, arg) => {
     mainWindow.close();
   }
 });
+ipcMain.on('reset-settings', async (event, arg) => {
+  try {
+    saveConfigOnExit = false;
+    fs.unlinkSync(configRootPath);
+    console.log('Deleted file:', configRootPath);
+  } catch (err) {
+    console.log('Error deleting config-root:', err.message);
+  }
+
+  if (isMac()) {
+    app.quit();
+  } else {
+    mainWindow.close();
+  }
+});
 ipcMain.on('set-title', async (event, arg) => {
   mainWindow.setTitle(arg);
 });
@@ -154,6 +199,19 @@ ipcMain.on('app-started', async (event, arg) => {
     mainWindow.webContents.send('run-command', runCommandOnLoad);
     runCommandOnLoad = null;
   }
+
+  if (initialConfig['winIsMaximized']) {
+    mainWindow.webContents.send('setIsMaximized', true);
+  }
+  if (autoUpdater.isUpdaterActive()) {
+    mainWindow.webContents.send('setAppUpdaterActive');
+  }
+  if (!process.env.DEVMODE) {
+    if (settingsJson['app.autoUpdateMode'] != 'skip') {
+      autoUpdater.autoDownload = settingsJson['app.autoUpdateMode'] == 'download';
+      autoUpdater.checkForUpdates();
+    }
+  }
 });
 ipcMain.on('window-action', async (event, arg) => {
   if (!mainWindow) {
@@ -164,11 +222,7 @@ ipcMain.on('window-action', async (event, arg) => {
       mainWindow.minimize();
       break;
     case 'maximize':
-      if (mainWindow.isMaximized()) {
-        mainWindow.unmaximize();
-      } else {
-        mainWindow.maximize();
-      }
+      mainWindow.isMaximized() ? mainWindow.unmaximize() : mainWindow.maximize();
       break;
     case 'close':
       mainWindow.close();
@@ -211,6 +265,9 @@ ipcMain.on('window-action', async (event, arg) => {
     case 'paste':
       mainWindow.webContents.paste();
       break;
+    case 'selectAll':
+      mainWindow.webContents.selectAll();
+      break;
   }
 });
 
@@ -228,6 +285,20 @@ ipcMain.handle('showItemInFolder', async (event, path) => {
 ipcMain.handle('openExternal', async (event, url) => {
   electron.shell.openExternal(url);
 });
+ipcMain.on('downloadUpdate', async (event, url) => {
+  autoUpdater.downloadUpdate();
+  changeAppUpdateStatus({
+    icon: 'icon loading',
+    message: `Downloading update...`,
+  });
+});
+ipcMain.on('applyUpdate', async (event, url) => {
+  autoUpdater.quitAndInstall(false, true);
+});
+ipcMain.on('check-for-updates', async (event, url) => {
+  autoUpdater.autoDownload = false;
+  autoUpdater.checkForUpdates();
+});
 
 function fillMissingSettings(value) {
   const res = {
@@ -240,10 +311,32 @@ function fillMissingSettings(value) {
   return res;
 }
 
+function ensureBoundsVisible(bounds) {
+  const area = electron.screen.getDisplayMatching(bounds).workArea;
+
+  let { x, y, width, height } = bounds;
+
+  const isWithinDisplay =
+    x >= area.x && x + width <= area.x + area.width && y >= area.y && y + height <= area.y + area.height;
+
+  if (!isWithinDisplay) {
+    width = Math.min(width, area.width);
+    height = Math.min(height, area.height);
+
+    if (width < 400) width = 400;
+    if (height < 300) height = 300;
+
+    x = area.x; // + Math.round(area.width - width / 2);
+    y = area.y; // + Math.round(area.height - height / 2);
+  }
+
+  return { x, y, width, height };
+}
+
 function createWindow() {
-  let settingsJson = {};
+  const datadir = path.join(os.homedir(), '.dbgate');
+
   try {
-    const datadir = path.join(os.homedir(), '.dbgate');
     settingsJson = fillMissingSettings(
       JSON.parse(fs.readFileSync(path.join(datadir, 'settings.json'), { encoding: 'utf-8' }))
     );
@@ -252,18 +345,21 @@ function createWindow() {
     settingsJson = fillMissingSettings({});
   }
 
-  const bounds = initialConfig['winBounds'];
+  let bounds = initialConfig['winBounds'];
+  if (bounds) {
+    bounds = ensureBoundsVisible(bounds);
+  }
   useNativeMenu = settingsJson['app.useNativeMenu'];
 
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
-    title: 'DbGate',
+    title: isProApp() ? 'DbGate Premium' : 'DbGate',
     frame: useNativeMenu,
     titleBarStyle: useNativeMenu ? undefined : 'hidden',
     ...bounds,
     icon: os.platform() == 'win32' ? 'icon.ico' : path.resolve(__dirname, '../icon.png'),
-    partition: 'persist:dbgate',
+    partition: isProApp() ? 'persist:dbgate-premium' : 'persist:dbgate',
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
@@ -291,23 +387,40 @@ function createWindow() {
       });
     mainWindow.on('close', () => {
       try {
-        fs.writeFileSync(
-          configRootPath,
-          JSON.stringify({
-            winBounds: mainWindow.getBounds(),
-            winIsMaximized: mainWindow.isMaximized(),
-          }),
-          'utf-8'
-        );
+        if (saveConfigOnExit) {
+          fs.writeFileSync(
+            configRootPath,
+            JSON.stringify({
+              winBounds: mainWindow.getBounds(),
+              winIsMaximized: mainWindow.isMaximized(),
+            }),
+            'utf-8'
+          );
+        }
       } catch (err) {
         console.log('Error saving config-root:', err.message);
       }
     });
+
+    // mainWindow.webContents.toggleDevTools();
+
     mainWindow.loadURL(startUrl);
     if (os.platform() == 'linux') {
       mainWindow.setIcon(path.resolve(__dirname, '../icon.png'));
     }
-    // mainWindow.webContents.toggleDevTools();
+
+    mainWindow.on('maximize', () => {
+      mainWindow.webContents.send('setIsMaximized', true);
+    });
+
+    mainWindow.on('unmaximize', () => {
+      mainWindow.webContents.send('setIsMaximized', false);
+    });
+
+    // app.on('browser-window-focus', () => {
+    //   const bounds = ensureBoundsVisible(mainWindow.getBounds());
+    //   mainWindow.setBounds(bounds);
+    // });
   }
 
   if (!apiLoaded) {
@@ -317,7 +430,6 @@ function createWindow() {
     );
 
     global.API_PACKAGE = apiPackage;
-    global.NATIVE_MODULES = path.join(__dirname, 'nativeModules');
 
     // console.log('global.API_PACKAGE', global.API_PACKAGE);
     const api = require(apiPackage);
@@ -327,9 +439,12 @@ function createWindow() {
     //     path.join(__dirname, process.env.DEVMODE ? '../../packages/api/src/index' : '../packages/api/dist/bundle.js')
     //   )
     // );
+    api.configureLogger();
     const main = api.getMainModule();
     main.useAllControllers(null, electron);
     mainModule = main;
+    // getLogger = api.getLogger;
+    // loadLogsContent = api.loadLogsContent;
     apiLoaded = true;
   }
   mainModule.setElectronSender(mainWindow.webContents);
@@ -346,10 +461,61 @@ function createWindow() {
   });
 }
 
-function onAppReady() {
-  if (!process.env.DEVMODE) {
-    autoUpdater.checkForUpdatesAndNotify();
+function changeAppUpdateStatus(status) {
+  appUpdateStatus = status;
+  mainWindow.webContents.send('app-update-status', appUpdateStatus);
+}
+
+autoUpdater.on('checking-for-update', () => {
+  console.log('Checking for updates');
+  changeAppUpdateStatus({
+    icon: 'icon loading',
+    message: 'Checking for updates...',
+  });
+});
+
+autoUpdater.on('update-available', info => {
+  console.log('Update available', info);
+  if (autoUpdater.autoDownload) {
+    changeAppUpdateStatus({
+      icon: 'icon loading',
+      message: `Downloading update...`,
+    });
+  } else {
+    mainWindow.webContents.send('update-available', info.version);
+    changeAppUpdateStatus({
+      icon: 'icon download',
+      message: `Update available`,
+    });
   }
+});
+
+autoUpdater.on('update-not-available', info => {
+  console.log('Update not available', info);
+  changeAppUpdateStatus({
+    icon: 'icon check',
+    message: `No new updates`,
+  });
+});
+
+autoUpdater.on('update-downloaded', info => {
+  console.log('Update downloaded from', info);
+  changeAppUpdateStatus({
+    icon: 'icon download',
+    message: `Downloaded ${info.version}`,
+  });
+  mainWindow.webContents.send('downloaded-new-version', info.version);
+});
+
+autoUpdater.on('error', error => {
+  changeAppUpdateStatus({
+    icon: 'icon error',
+    message: `Autoupdate error`,
+  });
+  console.error('Update error', error);
+});
+
+function onAppReady() {
   createWindow();
 }
 

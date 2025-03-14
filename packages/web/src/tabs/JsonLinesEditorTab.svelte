@@ -81,13 +81,14 @@
 
   let jslid = null;
 
-  const tabVisible: any = getContext('tabVisible');
+  const tabFocused: any = getContext('tabFocused');
 
   export const activator = createActivator('JsonLinesEditorTab', false);
 
   let domEditor;
+  let domToolStrip;
 
-  $: if ($tabVisible && domEditor) {
+  $: if ($tabFocused && domEditor) {
     domEditor?.getEditor()?.focus();
   }
 
@@ -172,7 +173,7 @@
   }
 </script>
 
-<ToolStripContainer>
+<ToolStripContainer bind:this={domToolStrip}>
   <VerticalSplitter isSplitter={jslid}>
     <svelte:fragment slot="1">
       <AceEditor
@@ -181,6 +182,7 @@
         on:input={e => setEditorData(e.detail)}
         on:focus={() => {
           activator.activate();
+          domToolStrip?.activate();
           invalidateCommands();
         }}
         bind:this={domEditor}

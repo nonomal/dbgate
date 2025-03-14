@@ -41,20 +41,21 @@ export class ScriptWriter {
     this.packageNames.push(packageName);
   }
 
-  copyStream(sourceVar, targetVar, colmapVar = null) {
-    if (colmapVar) {
-      this._put(`await dbgateApi.copyStream(${sourceVar}, ${targetVar}, {columns: ${colmapVar}});`);
-    } else {
-      this._put(`await dbgateApi.copyStream(${sourceVar}, ${targetVar});`);
-    }
-  }
+  copyStream(sourceVar, targetVar, colmapVar = null, progressName?: string) {
+    let opts = '{';
+    if (colmapVar) opts += `columns: ${colmapVar}, `;
+    if (progressName) opts += `progressName: "${progressName}", `;
+    opts += '}';
 
-  dumpDatabase(options) {
-    this._put(`await dbgateApi.dumpDatabase(${JSON.stringify(options)});`);
+    this._put(`await dbgateApi.copyStream(${sourceVar}, ${targetVar}, ${opts});`);
   }
 
   importDatabase(options) {
     this._put(`await dbgateApi.importDatabase(${JSON.stringify(options)});`);
+  }
+
+  dataDuplicator(options) {
+    this._put(`await dbgateApi.dataDuplicator(${JSON.stringify(options, null, 2)});`);
   }
 
   comment(s) {
@@ -113,12 +114,13 @@ export class ScriptWriterJson {
     });
   }
 
-  copyStream(sourceVar, targetVar, colmapVar = null) {
+  copyStream(sourceVar, targetVar, colmapVar = null, progressName?: string) {
     this.commands.push({
       type: 'copyStream',
       sourceVar,
       targetVar,
       colmapVar,
+      progressName,
     });
   }
 
@@ -129,16 +131,16 @@ export class ScriptWriterJson {
     });
   }
 
-  dumpDatabase(options) {
+  importDatabase(options) {
     this.commands.push({
-      type: 'dumpDatabase',
+      type: 'importDatabase',
       options,
     });
   }
 
-  importDatabase(options) {
+  dataDuplicator(options) {
     this.commands.push({
-      type: 'importDatabase',
+      type: 'dataDuplicator',
       options,
     });
   }
@@ -172,7 +174,7 @@ export function jsonScriptToJavascript(json) {
         script.assignValue(cmd.variableName, cmd.jsonValue);
         break;
       case 'copyStream':
-        script.copyStream(cmd.sourceVar, cmd.targetVar, cmd.colmapVar);
+        script.copyStream(cmd.sourceVar, cmd.targetVar, cmd.colmapVar, cmd.progressName);
         break;
       case 'endLine':
         script.endLine();
@@ -180,11 +182,11 @@ export function jsonScriptToJavascript(json) {
       case 'comment':
         script.comment(cmd.text);
         break;
-      case 'dumpDatabase':
-        script.dumpDatabase(cmd.options);
-        break;
       case 'importDatabase':
         script.importDatabase(cmd.options);
+        break;
+      case 'dataDuplicator':
+        script.dataDuplicator(cmd.options);
         break;
     }
   }

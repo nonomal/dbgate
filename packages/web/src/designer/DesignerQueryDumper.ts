@@ -1,25 +1,16 @@
 import _ from 'lodash';
-import {
-  dumpSqlSelect,
-  Select,
-  JoinType,
-  Condition,
-  Relation,
-  mergeConditions,
-  Source,
-  ResultField,
-  Expression,
-} from 'dbgate-sqltree';
-import { EngineDriver } from 'dbgate-types';
-import { DesignerInfo, DesignerTableInfo, DesignerReferenceInfo, DesignerJoinType } from './types';
-import { DesignerComponent } from './DesignerComponentCreator';
+import type { Select, JoinType, Condition, ResultField, Expression } from 'dbgate-sqltree';
+
+import { mergeConditions } from 'dbgate-sqltree';
+import type { DesignerInfo, DesignerTableInfo } from './types';
+import type { DesignerComponent } from './DesignerComponentCreator';
 import {
   getReferenceConditions,
   referenceIsCrossJoin,
   referenceIsConnecting,
   mergeSelectsFromDesigner,
   findQuerySource,
-  findDesignerFilterType,
+  findDesignerFilterBehaviour,
 } from './designerTools';
 import { parseFilter } from 'dbgate-filterparser';
 
@@ -92,7 +83,7 @@ export class DesignerQueryDumper {
       }
 
       try {
-        const condition = parseFilter(column[filterField], findDesignerFilterType(column, this.designer));
+        const condition = parseFilter(column[filterField], findDesignerFilterBehaviour(column, this.designer));
         if (condition) {
           conditions.push(
             _.cloneDeepWith(condition, expr => {

@@ -12,22 +12,28 @@ DbGate is cross-platform database manager.
 It's designed to be simple to use and effective, when working with more databases simultaneously.
 But there are also many advanced features like schema compare, visual query designer, chart visualisation or batch export and import.
 
-DbGate is licensed under MIT license and is completely free.
+DbGate is licensed under GPL-3.0 license and is free to use for any purpose.
 
 * Try it online - [demo.dbgate.org](https://demo.dbgate.org) - online demo application
 * **Download** application for Windows, Linux or Mac from [dbgate.org](https://dbgate.org/download/)
 * Run web version as [NPM package](https://www.npmjs.com/package/dbgate-serve) or as [docker image](https://hub.docker.com/r/dbgate/dbgate)
+* Use nodeJs [scripting interface](https://dbgate.org/docs/scripting) ([API documentation](https://dbgate.org/docs/apidoc))
+* [Recommend DbGate](https://testimonial.to/dbgate) | [Rate on G2](https://www.g2.com/products/dbgate/reviews)
 
 ## Supported databases
 * MySQL
 * PostgreSQL
 * SQL Server
+* Oracle
 * MongoDB
 * Redis
 * SQLite
-* Amazon Redshift
+* Amazon Redshift (Premium)
 * CockroachDB
 * MariaDB
+* CosmosDB (Premium)
+* ClickHouse
+* Apache Cassandra
 
 <!-- Learn more about DbGate features at the [DbGate website](https://dbgate.org/), or try our online [demo application](https://demo.dbgate.org) -->
 
@@ -48,13 +54,15 @@ DbGate is licensed under MIT license and is completely free.
 <!-- ![Screenshot](https://raw.githubusercontent.com/dbgate/dbgate/master/screenshot.png) -->
 
 ## Features
+* Browse table data with many filtering options, Excel-like filters, multi-value filters
 * Table data editing, with SQL change script preview
 * Edit table schema, indexes, primary and foreign keys
 * Compare and synchronize database structure
 * ER diagram
-* Light and dark theme
-* Master/detail views, foreign key lookups
-* Query designer
+* Light and dark theme, next themes available as plugins from github community
+* Huge support for work with related data - master/detail views, foreign key lookups, expanding columns from related tables in flat data view
+* Query designer - visual SQL query builder without writing SQL code. Complex conditions like WHERE NOT EXISTS.
+* Query perspectives – innovative nested table view over complex relational data, something like query designer on MongoDB databases
 * Form view for comfortable work with tables with many columns
 * JSON view on MongoDB collections
 * Explore tables, views, procedures, functions, MongoDB collections
@@ -66,10 +74,11 @@ DbGate is licensed under MIT license and is completely free.
 * Mongo JavaScript editor, execute Mongo script (with NodeJs syntax)
 * Redis tree view, generate script from keys, run Redis script
 * Runs as application for Windows, Linux and Mac. Or in Docker container on server and in web Browser on client.
-* Import, export from/to CSV, Excel, JSON, XML
-* Free table editor - quick table data editing (cleanup data after import/before export, prototype tables etc.)
-* Archives - backup your data in JSON files on local filesystem (or on DbGate server, when using web application)
+* Import, export from/to CSV, Excel, JSON, NDJSON, XML, DBF
+* Archives - backup your data in NDJSON files on local filesystem (or on DbGate server, when using web application)
+* NDJSON data viewer and editor - browse NDJSON data, edit data and structure directly on NDJSON files. Works also for big NDSON files
 * Charts, export chart to HTML page
+* Show GEO data on map, export map to HTML page
 * For detailed info, how to run DbGate in docker container, visit [docker hub](https://hub.docker.com/r/dbgate/dbgate)
 * Extensible plugin architecture
 
@@ -78,9 +87,10 @@ Any contributions are welcome. If you want to contribute without coding, conside
 
 * Tell your friends about DbGate or share on social networks - when more people will use DbGate, it will grow to be better
 * Write review on [Slant.co](https://www.slant.co/improve/options/41086/~dbgate-review) or [G2](https://www.g2.com/products/dbgate/reviews) 
-* Create issue, if you find problem in app, or you have idea to new feature. If issue already exists, you could leave comment on it, to prioritise most wanted issues.
-* Become a backer on [Open collective](https://opencollective.com/dbgate)
-* Where a small coding is acceptable for you, you could [create plugin](https://dbgate.org/docs/plugin-development.html). Plugins for new themes can be created actually without JS coding.
+* Create issue, if you find problem in app, or you have idea to new feature. If issue already exists, you could leave comment on it, to prioritise most wanted issues
+* Create some tutorial video on [youtube](https://www.youtube.com/playlist?list=PLCo7KjCVXhr0RfUSjM9wJMsp_ShL1q61A)
+* Become a backer on [GitHub sponsors](https://github.com/sponsors/dbgate) or [Open collective](https://opencollective.com/dbgate)
+* Where a small coding is acceptable for you, you could [create plugin](https://dbgate.org/docs/plugin-development). Plugins for new themes can be created actually without JS coding
 
 Thank you!
 
@@ -91,7 +101,7 @@ There are many database managers now, so why DbGate?
 * Many data browsing functions based using foreign keys - master/detail, expand columns, expandable form view
 
 ## Design goals
-* Application simplicity - DbGate takes the best and only the best from old [DbGate](http://www.jenasoft.com/dbgate), [DatAdmin](http://www.jenasoft.com/datadmin) and [DbMouse](http://www.jenasoft.com/dbmouse) .
+* Application simplicity - DbGate takes the best and only the best from old DbGate, [DatAdmin](https://www.softpedia.com/get/Internet/Servers/Database-Utils/DatAdmin-Personal.shtml), [DbMouse](https://www.softpedia.com/get/Internet/Servers/Database-Utils/DbMouse.shtml) and [SQL Database Studio](https://en.wikipedia.org/wiki/SQL_Database_Studio)
 * Minimal dependencies
     * Frontend - Svelte
     * Backend - NodeJs, ExpressJs, database connection drivers
@@ -173,3 +183,6 @@ yarn plugin # this compiles plugin and copies it into existing DbGate installati
 ```
 
 After restarting DbGate, you could use your new plugin from DbGate.
+
+## Logging
+DbGate uses [pinomin logger](https://github.com/dbgate/pinomin). So by default, it produces JSON log messages into console and log files. If you want to see formatted logs, please use [pino-pretty](https://github.com/pinojs/pino-pretty) log formatter.

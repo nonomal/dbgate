@@ -5,6 +5,7 @@
   export let disabled = false;
   export let icon = null;
   export let title = null;
+  export let iconAfter = null;
 
   const dispatch = createEventDispatcher();
 
@@ -15,9 +16,12 @@
 </script>
 
 <div class="button" class:disabled {title}>
-  <div class="inner" class:disabled on:click={handleClick}>
+  <div class="inner" class:disabled on:click={handleClick} data-testid={$$props['data-testid']}>
     <span class="icon" class:disabled><FontIcon {icon} /></span>
     <slot />
+    {#if iconAfter}
+      <span class="icon" class:disabled><FontIcon icon={iconAfter} /></span>
+    {/if}
   </div>
 </div>
 
@@ -31,6 +35,7 @@
     align-self: stretch;
     display: flex;
     user-select: none;
+    margin: 2px 0px;
   }
   .button.disabled {
     color: var(--theme-font-3);

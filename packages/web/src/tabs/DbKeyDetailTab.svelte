@@ -7,9 +7,10 @@
   export const allowAddToFavorites = props => false;
 
   function getKeyText(key) {
+    if (!key) return '(no name)';
     const keySplit = key.split(':');
     if (keySplit.length > 1) return keySplit[keySplit.length - 1];
-    return key;
+    return key || '(no name)';
   }
 </script>
 
@@ -32,6 +33,9 @@
   import DbKeyAddItemModal from '../modals/DbKeyAddItemModal.svelte';
   import ErrorMessageModal from '../modals/ErrorMessageModal.svelte';
   import { changeTab } from '../utility/common';
+  import SelectField from '../forms/SelectField.svelte';
+  import DbKeyValueDetail from '../dbkeyvalue/DbKeyValueDetail.svelte';
+  import { _t } from '../translations';
 
   export let tabid;
   export let conid;
@@ -131,12 +135,16 @@
       </div>
       <FormStyledButton value={`TTL:${keyInfo.ttl}`} on:click={() => handleChangeTtl(keyInfo)} />
       {#if keyInfo.type == 'string'}
-        <FormStyledButton value="Save" on:click={saveString} disabled={!editedValue} />
+        <FormStyledButton
+          value={_t('common.save', { defaultMessage: 'Save' })}
+          on:click={saveString}
+          disabled={!editedValue}
+        />
       {/if}
       {#if keyInfo.keyType?.addMethod && keyInfo.keyType?.showItemList}
         <FormStyledButton value="Add item" on:click={() => addItem(keyInfo)} />
       {/if}
-      <FormStyledButton value="Refresh" on:click={refresh} />
+      <FormStyledButton value={_t('common.refresh', { defaultMessage: 'Refresh' })} on:click={refresh} />
     </div>
 
     <div class="content">
@@ -157,12 +165,15 @@
           </svelte:fragment>
         </VerticalSplitter>
       {:else}
-        <AceEditor
-          value={editedValue || keyInfo.value}
-          on:input={e => {
-            editedValue = e.detail;
-          }}
-        />
+        <div class="value-holder">
+          <DbKeyValueDetail
+            columnTitle="Value"
+            value={editedValue || keyInfo.value}
+            onChangeValue={value => {
+              editedValue = value;
+            }}
+          />
+        </div>
       {/if}
     </div>
   </div>
@@ -198,5 +209,16 @@
 
   .key-name :global(input) {
     flex-grow: 1;
+  }
+
+  .value-holder {
+    position: absolute;
+    left: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
+
+    display: flex;
+    flex-direction: column;
   }
 </style>

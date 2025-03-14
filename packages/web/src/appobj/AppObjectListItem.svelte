@@ -24,6 +24,7 @@
   export let passProps;
   export let getIsExpanded = null;
   export let setIsExpanded = null;
+  export let isMainMatched = false;
 
   let isExpandedCore = false;
 
@@ -50,18 +51,29 @@
   <svelte:component
     this={module.default}
     {data}
-    on:click={handleExpand}
+    on:dblclick={handleExpand}
     on:expand={handleExpandButton}
     expandIcon={getExpandIcon(!isExpandedBySearch && expandable, subItemsComponent, isExpanded, expandIconFunc)}
     {checkedObjectsStore}
     {module}
     {disableContextMenu}
     {passProps}
+    {filter}
   />
 
   {#if (isExpanded || isExpandedBySearch) && subItemsComponent}
     <div class="subitems">
-      <svelte:component this={subItemsComponent} {data} {filter} {passProps} />
+      <svelte:component
+        this={subItemsComponent(data, {
+          isExpandedBySearch,
+        })}
+        {data}
+        {filter}
+        {passProps}
+        {isExpandedBySearch}
+        {isExpanded}
+        {isMainMatched}
+      />
     </div>
   {/if}
 {/if}

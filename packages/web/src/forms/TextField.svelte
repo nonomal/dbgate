@@ -4,6 +4,7 @@
   export let value;
   export let focused = false;
   export let domEditor = undefined;
+  export let autocomplete = 'new-password';
 
   if (focused) onMount(() => domEditor.focus());
 </script>
@@ -14,7 +15,8 @@
   bind:value
   on:change
   on:input
+  on:click
   bind:this={domEditor}
   on:keydown
-  autocomplete="new-password"
+  {autocomplete}
 />

@@ -1,29 +1,53 @@
-<div class="toolstrip">
-  <slot name="toolstrip" />
-</div>
+<script lang="ts">
+  import { get_current_component } from 'svelte/internal';
+  import createActivator, { isComponentActiveStore } from '../utility/createActivator';
 
-<div class="content">
-  <slot />
+  const thisInstance = get_current_component();
+
+  export const activator = createActivator('ToolStripContainer', true);
+
+  $: isComponentActive = $isComponentActiveStore('ToolStripContainer', thisInstance);
+
+  export function activate() {
+    activator?.activate();
+  }
+
+  export let scrollContent = false;
+</script>
+
+<div class="wrapper">
+  <div class="content" class:scrollContent>
+    <slot />
+  </div>
+
+  {#if isComponentActive}
+    <div class="toolstrip">
+      <slot name="toolstrip" />
+    </div>
+  {/if}
 </div>
 
 <style>
-  .content {
-    position: absolute;
-    left: 0;
-    top: 0;
-    border-bottom: 1px solid var(--theme-border);
-    right: 0;
-    bottom: var(--dim-toolstrip-height);
+  .wrapper {
+    flex: 1;
     display: flex;
+    flex-direction: column;
+  }
+  .content {
+    border-bottom: 1px solid var(--theme-border);
+    display: flex;
+    flex: 1;
+    position: relative;
+    max-height: 100%;
   }
 
   .toolstrip {
-    position: absolute;
-    left: 0;
-    height: var(--dim-toolstrip-height);
-    right: 0;
-    bottom: 0;
     display: flex;
+    flex-wrap: wrap;
     background: var(--theme-bg-1);
+  }
+
+  .scrollContent {
+    overflow-y: auto;
   }
 </style>

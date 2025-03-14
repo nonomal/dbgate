@@ -15,6 +15,7 @@
   export let isParentArray;
   export let expanded = !!getContext('json-tree-default-expanded');
   export let labelOverride = null;
+  export let onRootExpandedChanged = null;
 
   $: nodeType = objType(value);
   $: componentType = getComponent(nodeType);
@@ -34,6 +35,8 @@
         return typeof value.set === 'function' ? JSONIterableMapNode : JSONIterableArrayNode;
       case 'MapEntry':
         return JSONMapEntryNode;
+      case 'ObjectId':
+        return JSONValueNode;
       default:
         return JSONValueNode;
     }
@@ -63,6 +66,8 @@
       case 'Function':
       case 'Symbol':
         return raw => raw.toString();
+      case 'ObjectId':
+        return raw => `ObjectId("${raw.$oid}")`;
       default:
         return () => `<${nodeType}>`;
     }
@@ -79,4 +84,5 @@
   {valueGetter}
   {expanded}
   {labelOverride}
+  {onRootExpandedChanged}
 />

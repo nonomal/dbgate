@@ -12,13 +12,15 @@
   });
 
   async function loadDataPage(props, offset, limit) {
-    const { jslid, display } = props;
+    const { jslid, display, formatterFunction } = props;
 
     const response = await apiCall('jsldata/get-rows', {
       jslid,
       offset,
       limit,
-      filters: display ? display.compileFilters() : null,
+      formatterFunction,
+      filters: display ? display.compileJslFilters() : null,
+      sort: display.config.sort,
     });
 
     return response;
@@ -34,15 +36,15 @@
     const response = await apiCall('jsldata/get-stats', { jslid });
     return response.rowCount;
   }
+
+  export let formatterPlugin;
+  export let formatterFunction;
 </script>
 
 <script lang="ts">
   import _ from 'lodash';
   import { registerQuickExportHandler } from '../buttons/ToolStripExportButton.svelte';
   import registerCommand from '../commands/registerCommand';
-  import ImportExportModal from '../modals/ImportExportModal.svelte';
-  import { showModal } from '../modals/modalTools';
-  import { extensions } from '../stores';
   import { apiCall, apiOff, apiOn } from '../utility/api';
 
   import { registerMenu } from '../utility/contextMenu';
@@ -50,22 +52,34 @@
   import createQuickExportMenu from '../utility/createQuickExportMenu';
   import { exportQuickExportFile } from '../utility/exportFileTools';
   import useEffect from '../utility/useEffect';
+  import ChangeSetGrider from './ChangeSetGrider';
 
   import LoadingDataGridCore from './LoadingDataGridCore.svelte';
-  import RowsArrayGrider from './RowsArrayGrider';
+  import { openImportExportTab } from '../utility/importExportTools';
 
   export let jslid;
   export let display;
+  export let formatterFunction;
 
+  export let changeSetState;
+  export let dispatchChangeSet;
+
+  export let macroPreview;
+  export let macroValues;
+  export let onPublishedCellsChanged;
   export const activator = createActivator('JslDataGridCore', false);
 
-  export let loadedRows = [];
+  export let setLoadedRows;
+
+  let publishedCells = [];
+
+  let loadedRows = [];
   let domGrid;
 
   let changeIndex = 0;
   let rowCountLoaded = null;
 
-  const throttleLoadNext = _.throttle(() => domGrid.resetLoadedAll(), 500);
+  const throttleLoadNext = _.throttle(() => domGrid?.resetLoadedAll(), 500);
 
   const handleJslDataStats = stats => {
     if (stats.changeIndex < changeIndex) return;
@@ -87,7 +101,39 @@
   }
   $: $effect;
 
-  $: grider = new RowsArrayGrider(loadedRows);
+  let grider;
+
+  $: {
+    if (macroPreview) {
+      grider = new ChangeSetGrider(
+        loadedRows,
+        changeSetState,
+        dispatchChangeSet,
+        display,
+        macroPreview,
+        macroValues,
+        publishedCells,
+        true
+      );
+    }
+  }
+
+  $: {
+    if (!macroPreview) {
+      grider = new ChangeSetGrider(
+        loadedRows,
+        changeSetState,
+        dispatchChangeSet,
+        display,
+        undefined,
+        undefined,
+        undefined,
+        true
+      );
+    }
+  }
+
+  // $: grider = new RowsArrayGrider(loadedRows);
 
   export function exportGrid() {
     const initialValues = {} as any;
@@ -103,7 +149,8 @@
       initialValues.sourceList = ['query-data'];
       initialValues[`columns_query-data`] = display.getExportColumnMap();
     }
-    showModal(ImportExportModal, { initialValues });
+    openImportExportTab(initialValues);
+    // showModal(ImportExportModal, { initialValues });
   }
 
   const quickExportHandler = fmt => async () => {
@@ -137,16 +184,32 @@
   };
   registerQuickExportHandler(quickExportHandler);
 
-  registerMenu(() => ({
-    ...createQuickExportMenu(quickExportHandler, { command: 'jslTableGrid.export' }),
-    tag: 'export',
-  }));
+  registerMenu(() =>
+    createQuickExportMenu(
+      quickExportHandler,
+      {
+        command: 'jslTableGrid.export',
+      },
+      { tag: 'export' }
+    )
+  );
+
+  function handleSetLoadedRows(rows) {
+    loadedRows = rows;
+    setLoadedRows?.(rows);
+  }
 </script>
 
 <LoadingDataGridCore
   bind:this={domGrid}
   {...$$props}
-  bind:loadedRows
+  setLoadedRows={handleSetLoadedRows}
+  onPublishedCellsChanged={value => {
+    publishedCells = value;
+    if (onPublishedCellsChanged) {
+      onPublishedCellsChanged(value);
+    }
+  }}
   {loadDataPage}
   {dataPageAvailable}
   {loadRowCount}

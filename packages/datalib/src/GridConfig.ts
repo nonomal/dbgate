@@ -1,6 +1,3 @@
-import { DisplayColumn } from './GridDisplay';
-import { TableInfo } from 'dbgate-types';
-
 export interface GridConfigColumns {
   hiddenColumns: string[];
   expandedColumns: string[];
@@ -30,10 +27,10 @@ export interface GridConfig extends GridConfigColumns {
   childConfig?: GridConfig;
   reference?: GridReferenceDefinition;
   isFormView?: boolean;
-  formViewKey?: { [uniqueName: string]: string };
-  formViewKeyRequested?: { [uniqueName: string]: string };
+  formViewRecordNumber?: number;
   formFilterColumns: string[];
   formColumnFilterText?: string;
+  multiColumnFilter?: string;
 }
 
 export interface GridCache {

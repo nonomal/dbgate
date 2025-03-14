@@ -6,8 +6,16 @@
 
   import FontIcon from '../icons/FontIcon.svelte';
 
-  import { activeTabId, currentDatabase, currentThemeDefinition, visibleCommandPalette } from '../stores';
-  import getConnectionLabel from '../utility/getConnectionLabel';
+  import {
+    activeTabId,
+    appUpdateStatus,
+    currentArchive,
+    currentDatabase,
+    currentThemeDefinition,
+    selectedWidget,
+    visibleCommandPalette,
+  } from '../stores';
+  import { getConnectionLabel } from 'dbgate-tools';
   import { useConnectionList, useDatabaseServerVersion, useDatabaseStatus } from '../utility/metadataLoaders';
   import { findCommand } from '../commands/runCommand';
   import { useConnectionColor } from '../utility/useConnectionColor';
@@ -140,6 +148,18 @@
         </div>
       </div>
     {/if}
+    {#if $currentArchive}
+      <div
+        class="item flex clickable"
+        title="Current archive"
+        on:click={() => {
+          $selectedWidget = 'archive';
+        }}
+      >
+        <FontIcon icon="icon archive" padRight />
+        {$currentArchive}
+      </div>
+    {/if}
   </div>
   <div class="container">
     {#each contextItems || [] as item}
@@ -150,6 +170,13 @@
         {item.text}
       </div>
     {/each}
+
+    {#if $appUpdateStatus}
+      <div class="item">
+        <FontIcon icon={$appUpdateStatus.icon} padRight />
+        {$appUpdateStatus.message}
+      </div>
+    {/if}
   </div>
 </div>
 
@@ -170,6 +197,7 @@
     padding: 0px 10px;
     display: flex;
     align-items: center;
+    white-space: nowrap;
   }
 
   .version {

@@ -1,8 +1,12 @@
 const ObjectId = require('mongodb').ObjectId;
+const { getLogger, extractErrorLogData } = global.DBGATE_PACKAGES['dbgate-tools'];
+const { EJSON } = require('bson');
 
-function createBulkInsertStream(driver, stream, pool, name, options) {
+const logger = getLogger('mongoBulkInsert');
+
+function createBulkInsertStream(driver, stream, dbhan, name, options) {
   const collectionName = name.pureName;
-  const db = pool.__getDatabase();
+  const db = dbhan.getDatabase();
 
   const writable = new stream.Writable({
     objectMode: true,
@@ -22,25 +26,35 @@ function createBulkInsertStream(driver, stream, pool, name, options) {
         ...row,
       };
     }
-    writable.buffer.push(row);
+    writable.buffer.push(EJSON.deserialize(row));
   };
 
   writable.checkStructure = async () => {
-    if (options.dropIfExists) {
-      console.log(`Dropping collection ${collectionName}`);
-      await db.collection(collectionName).drop();
-    }
-    if (options.truncate) {
-      console.log(`Truncating collection ${collectionName}`);
-      await db.collection(collectionName).deleteMany({});
+    try {
+      if (options.dropIfExists) {
+        logger.info(`Dropping collection ${collectionName}`);
+        await db.collection(collectionName).drop();
+      }
+      if (options.truncate) {
+        logger.info(`Truncating collection ${collectionName}`);
+        await db.collection(collectionName).deleteMany({});
+      }
+    } catch (err) {
+      logger.error(extractErrorLogData(err), 'Error during preparing mongo bulk insert collection, stopped');
+      writable.destroy(err);
     }
   };
 
   writable.send = async () => {
-    const rows = writable.buffer;
-    writable.buffer = [];
+    try {
+      const rows = writable.buffer;
+      writable.buffer = [];
 
-    await db.collection(collectionName).insertMany(rows);
+      await db.collection(collectionName).insertMany(rows);
+    } catch (err) {
+      logger.error(extractErrorLogData(err), 'Error bulk insert collection, stopped');
+      writable.destroy(err);
+    }
   };
 
   writable.sendIfFull = async () => {

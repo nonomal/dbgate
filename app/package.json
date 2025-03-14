@@ -1,12 +1,13 @@
 {
   "name": "dbgate",
-  "version": "5.0.0-alpha.1",
+  "version": "6.0.0-alpha.1",
   "private": true,
   "author": "Jan Prochazka <jenasoft.database@gmail.com>",
   "description": "Opensource database administration tool",
   "dependencies": {
     "electron-log": "^4.4.1",
-    "electron-updater": "^4.6.1",
+    "electron-updater": "^6.3.4",
+    "jsonwebtoken": "^9.0.2",
     "lodash.clonedeepwith": "^4.5.0",
     "patch-package": "^6.4.7"
   },
@@ -18,23 +19,29 @@
     "artifactName": "dbgate-${version}-${os}_${arch}.${ext}",
     "appId": "org.dbgate",
     "productName": "DbGate",
-    "afterSign": "electron-builder-notarize",
+    "asarUnpack": "**/*.node",
     "mac": {
       "category": "database",
-      "icon": "icon512.png",
+      "icon": "icon512-mac.png",
       "hardenedRuntime": true,
       "entitlements": "entitlements.mac.plist",
       "entitlementsInherit": "entitlements.mac.plist",
       "publish": [
-        "github"
+        {
+          "provider": "github",
+          "owner": "dbgate",
+          "repo": "dbgate"
+        }
       ],
       "target": {
         "target": "default",
         "arch": [
           "universal",
-          "x64"
+          "x64",
+          "arm64"
         ]
-      }
+      },
+      "notarize": true
     },
     "linux": {
       "target": [
@@ -44,16 +51,20 @@
           "target": "AppImage",
           "arch": [
             "x64",
-            "armv7l",
             "arm64"
           ]
-        }
+        },
+        "tar.gz"
       ],
       "icon": "icons/",
       "category": "Development",
       "synopsis": "Database manager for SQL Server, MySQL, PostgreSQL, MongoDB and SQLite",
       "publish": [
-        "github"
+        {
+          "provider": "github",
+          "owner": "dbgate",
+          "repo": "dbgate"
+        }
       ]
     },
     "appImage": {
@@ -71,7 +82,13 @@
     },
     "win": {
       "target": [
-        "nsis",
+        {
+          "target": "nsis",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
         {
           "target": "zip",
           "arch": [
@@ -82,14 +99,18 @@
       ],
       "icon": "icon.ico",
       "publish": [
-        "github"
-      ],
-      "rfc3161TimeStampServer": "http://sha256timestamp.ws.symantec.com/sha256/timestamp"
+        {
+          "provider": "github",
+          "owner": "dbgate",
+          "repo": "dbgate"
+        }
+      ]
     },
     "files": [
       "packages",
       "src",
-      "icon.png"
+      "icon.png",
+      "!node_modules/cpu-features/build/**"
     ]
   },
   "homepage": "./",
@@ -107,12 +128,7 @@
   "devDependencies": {
     "copyfiles": "^2.2.0",
     "cross-env": "^6.0.3",
-    "electron": "13.6.3",
-    "electron-builder": "22.14.5",
-    "electron-builder-notarize": "^1.4.0"
-  },
-  "optionalDependencies": {
-    "better-sqlite3": "7.5.0",
-    "msnodesqlv8": "^2.4.4"
+    "electron": "30.0.2",
+    "electron-builder": "25.1.8"
   }
 }

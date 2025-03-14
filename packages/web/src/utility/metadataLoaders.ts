@@ -1,18 +1,22 @@
 import _ from 'lodash';
 import { loadCachedValue, subscribeCacheChange, unsubscribeCacheChange } from './cache';
 import stableStringify from 'json-stable-stringify';
-import getAsArray from './getAsArray';
-import { DatabaseInfo } from 'dbgate-types';
 import { derived } from 'svelte/store';
 import { extendDatabaseInfo } from 'dbgate-tools';
 import { setLocalStorage } from '../utility/storageCache';
 import { apiCall, apiOff, apiOn } from './api';
 
-const databaseInfoLoader = ({ conid, database }) => ({
+const databaseInfoLoader = ({ conid, database, modelTransFile }) => ({
   url: 'database-connections/structure',
-  params: { conid, database },
-  reloadTrigger: `database-structure-changed-${conid}-${database}`,
+  params: { conid, database, modelTransFile },
+  reloadTrigger: { key: `database-structure-changed`, conid, database },
   transform: extendDatabaseInfo,
+});
+
+const schemaListLoader = ({ conid, database }) => ({
+  url: 'database-connections/schema-list',
+  params: { conid, database },
+  reloadTrigger: { key: `schema-list-changed`, conid, database },
 });
 
 // const tableInfoLoader = ({ conid, database, schemaName, pureName }) => ({
@@ -30,31 +34,31 @@ const databaseInfoLoader = ({ conid, database }) => ({
 const connectionInfoLoader = ({ conid }) => ({
   url: 'connections/get',
   params: { conid },
-  reloadTrigger: 'connection-list-changed',
+  reloadTrigger: { key: 'connection-list-changed' },
 });
 
 const configLoader = () => ({
   url: 'config/get',
   params: {},
-  reloadTrigger: 'config-changed',
+  reloadTrigger: { key: 'config-changed' },
 });
 
 const settingsLoader = () => ({
   url: 'config/get-settings',
   params: {},
-  reloadTrigger: 'settings-changed',
+  reloadTrigger: { key: 'settings-changed' },
 });
 
 const platformInfoLoader = () => ({
   url: 'config/platform-info',
   params: {},
-  reloadTrigger: 'platform-info-changed',
+  reloadTrigger: { key: 'platform-info-changed' },
 });
 
 const favoritesLoader = () => ({
   url: 'files/favorites',
   params: {},
-  reloadTrigger: 'files-changed-favorites',
+  reloadTrigger: { key: 'files-changed-favorites' },
 });
 
 // const sqlObjectListLoader = ({ conid, database }) => ({
@@ -66,16 +70,17 @@ const favoritesLoader = () => ({
 const databaseStatusLoader = ({ conid, database }) => ({
   url: 'database-connections/status',
   params: { conid, database },
-  reloadTrigger: `database-status-changed-${conid}-${database}`,
+  reloadTrigger: { key: `database-status-changed`, conid, database },
 });
 
 const databaseListLoader = ({ conid }) => ({
   url: 'server-connections/list-databases',
   params: { conid },
-  reloadTrigger: `database-list-changed-${conid}`,
+  reloadTrigger: { key: `database-list-changed`, conid },
   onLoaded: value => {
     if (value?.length > 0) setLocalStorage(`database_list_${conid}`, value);
   },
+  errorValue: [],
 });
 
 // const databaseKeysLoader = ({ conid, database, root }) => ({
@@ -87,37 +92,37 @@ const databaseListLoader = ({ conid }) => ({
 const serverVersionLoader = ({ conid }) => ({
   url: 'server-connections/version',
   params: { conid },
-  reloadTrigger: `server-version-changed-${conid}`,
+  reloadTrigger: { key: `server-version-changed`, conid },
 });
 
 const databaseServerVersionLoader = ({ conid, database }) => ({
   url: 'database-connections/server-version',
   params: { conid, database },
-  reloadTrigger: `database-server-version-changed-${conid}-${database}`,
+  reloadTrigger: { key: `database-server-version-changed`, conid, database },
 });
 
 const archiveFoldersLoader = () => ({
   url: 'archive/folders',
   params: {},
-  reloadTrigger: `archive-folders-changed`,
+  reloadTrigger: { key: `archive-folders-changed` },
 });
 
 const archiveFilesLoader = ({ folder }) => ({
   url: 'archive/files',
   params: { folder },
-  reloadTrigger: `archive-files-changed-${folder}`,
+  reloadTrigger: { key: `archive-files-changed`, folder },
 });
 
 const appFoldersLoader = () => ({
   url: 'apps/folders',
   params: {},
-  reloadTrigger: `app-folders-changed`,
+  reloadTrigger: { key: `app-folders-changed` },
 });
 
 const appFilesLoader = ({ folder }) => ({
   url: 'apps/files',
   params: { folder },
-  reloadTrigger: `app-files-changed-${folder}`,
+  reloadTrigger: { key: `app-files-changed`, app: folder },
 });
 
 // const dbAppsLoader = ({ conid, database }) => ({
@@ -129,41 +134,41 @@ const appFilesLoader = ({ folder }) => ({
 const usedAppsLoader = ({ conid, database }) => ({
   url: 'apps/get-used-apps',
   params: {},
-  reloadTrigger: `used-apps-changed`,
+  reloadTrigger: { key: `used-apps-changed` },
 });
 
 const serverStatusLoader = () => ({
   url: 'server-connections/server-status',
   params: {},
-  reloadTrigger: `server-status-changed`,
+  reloadTrigger: { key: `server-status-changed` },
 });
 
 const connectionListLoader = () => ({
   url: 'connections/list',
   params: {},
-  reloadTrigger: `connection-list-changed`,
+  reloadTrigger: { key: `connection-list-changed` },
 });
 
 const installedPluginsLoader = () => ({
   url: 'plugins/installed',
   params: {},
-  reloadTrigger: `installed-plugins-changed`,
+  reloadTrigger: { key: `installed-plugins-changed` },
 });
 
 const filesLoader = ({ folder }) => ({
   url: 'files/list',
   params: { folder },
-  reloadTrigger: `files-changed-${folder}`,
+  reloadTrigger: { key: `files-changed`, folder },
 });
 const allFilesLoader = () => ({
   url: 'files/list-all',
   params: {},
-  reloadTrigger: `all-files-changed`,
+  reloadTrigger: { key: `all-files-changed` },
 });
 const authTypesLoader = ({ engine }) => ({
   url: 'plugins/auth-types',
   params: { engine },
-  reloadTrigger: `installed-plugins-changed`,
+  reloadTrigger: { key: `installed-plugins-changed` },
   errorValue: null,
 });
 
@@ -451,3 +456,9 @@ export function useAuthTypes(args) {
 // export function useDatabaseKeys(args) {
 //   return useCore(databaseKeysLoader, args);
 // }
+export function getSchemaList(args) {
+  return getCore(schemaListLoader, args);
+}
+export function useSchemaList(args) {
+  return useCore(schemaListLoader, args);
+}

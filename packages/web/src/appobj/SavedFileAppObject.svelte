@@ -1,5 +1,5 @@
 <script lang="ts" context="module">
-  import { filterName } from 'dbgate-tools';
+  import { filterName, getConnectionLabel } from 'dbgate-tools';
 
   interface FileTypeHandler {
     icon: string;
@@ -65,6 +65,30 @@
     currentConnection: true,
   };
 
+  const jobs: FileTypeHandler = {
+    icon: 'img export',
+    format: 'json',
+    tabComponent: 'ImportExportTab',
+    folder: 'jobs',
+    currentConnection: false,
+  };
+
+  const perspectives: FileTypeHandler = {
+    icon: 'img perspective',
+    format: 'json',
+    tabComponent: 'PerspectiveTab',
+    folder: 'pesrpectives',
+    currentConnection: true,
+  };
+
+  const modtrans: FileTypeHandler = {
+    icon: 'img transform',
+    format: 'text',
+    tabComponent: 'ModelTransformTab',
+    folder: 'modtrans',
+    currentConnection: false,
+  };
+
   export const SAVED_FILE_HANDLERS = {
     sql,
     shell,
@@ -73,10 +97,16 @@
     query,
     sqlite,
     diagrams,
+    perspectives,
+    jobs,
+    modtrans,
   };
 
   export const extractKey = data => data.file;
-  export const createMatcher = ({ file }) => filter => filterName(filter, file);
+  export const createMatcher =
+    filter =>
+    ({ file }) =>
+      filterName(filter, file);
 </script>
 
 <script lang="ts">
@@ -88,7 +118,6 @@
   import { currentDatabase } from '../stores';
   import { apiCall } from '../utility/api';
 
-  import getConnectionLabel from '../utility/getConnectionLabel';
   import hasPermission from '../utility/hasPermission';
   import openNewTab from '../utility/openNewTab';
 

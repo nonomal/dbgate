@@ -9,6 +9,7 @@
     toolbar: true,
     isRelatedToTab: true,
     testEnabled: () => getCurrentEditor()?.canArrange(),
+    // testEnabled: () => !!getCurrentEditor(),
     onClick: () => getCurrentEditor().arrange(),
   });
 
@@ -47,6 +48,9 @@
   import ChooseColorModal from '../modals/ChooseColorModal.svelte';
   import { currentThemeDefinition } from '../stores';
   import { extendDatabaseInfoFromApps } from 'dbgate-tools';
+  import SearchInput from '../elements/SearchInput.svelte';
+  import CloseSearchButton from '../buttons/CloseSearchButton.svelte';
+  import DragColumnMemory from './DragColumnMemory.svelte';
 
   export let value;
   export let onChange;
@@ -63,6 +67,7 @@
   let canvasHeight = 3000;
   let dragStartPoint = null;
   let dragCurrentPoint = null;
+  let columnFilter;
 
   const sourceDragColumn$ = writable(null);
   const targetDragColumn$ = writable(null);
@@ -79,7 +84,15 @@
 
   const tableRefs = {};
   const referenceRefs = {};
-  $: domTables = _.pickBy(_.mapValues(tableRefs, (tbl: any) => tbl?.getDomTable()));
+  let domTables;
+  $: {
+    tableRefs;
+    recomputeDomTables();
+  }
+
+  function recomputeDomTables() {
+    domTables = _.pickBy(_.mapValues(tableRefs, (tbl: any) => tbl?.getDomTable()));
+  }
 
   function fixPositions(tables) {
     const minLeft = _.min(tables.map(x => x.left));
@@ -174,8 +187,8 @@
     canvasHeight = Math.max(3000, maxY + 50);
   }
 
-  function callChange(changeFunc, skipUndoChain = undefined) {
-    onChange(changeFunc, skipUndoChain);
+  function callChange(changeFunc, skipUndoChain = undefined, settings = undefined) {
+    onChange(changeFunc, skipUndoChain, settings);
     tick().then(recomputeReferencePositions);
   }
 
@@ -218,14 +231,18 @@
       }));
       updateFromDbInfo();
     } else {
-      callChange(current => ({
-        ...current,
-        tables: (current.tables || []).filter(x => x.designerId != table.designerId),
-        references: (current.references || []).filter(
-          x => x.sourceId != table.designerId && x.targetId != table.designerId
-        ),
-        columns: (current.columns || []).filter(x => x.designerId != table.designerId),
-      }));
+      callChange(
+        current => ({
+          ...current,
+          tables: (current.tables || []).filter(x => x.designerId != table.designerId),
+          references: (current.references || []).filter(
+            x => x.sourceId != table.designerId && x.targetId != table.designerId
+          ),
+          columns: (current.columns || []).filter(x => x.designerId != table.designerId),
+        }),
+        undefined,
+        { removeTables: true }
+      );
     }
   };
 
@@ -474,7 +491,7 @@
     const rect = e.target.getBoundingClientRect();
     var json = JSON.parse(data);
     const { objectTypeField } = json;
-    if (objectTypeField != 'tables' && objectTypeField != 'views') return;
+    if (objectTypeField != 'tables' && objectTypeField != 'views' && objectTypeField != 'collections') return;
     json.designerId = `${json.pureName}-${uuidv1()}`;
     json.left = e.clientX - rect.left;
     json.top = e.clientY - rect.top;
@@ -625,12 +642,23 @@
   }
 
   export function canArrange() {
-    return settings?.canArrange;
+    return !!settings?.arrangeAlg;
   }
 
   export function canExport() {
     return settings?.canExport;
   }
+
+  // export function arrange(skipUndoChain = false) {
+  //   switch (settings?.arrangeAlg) {
+  //     case 'springy':
+  //       arrange_springy(skipUndoChain);
+  //       break;
+  //     case 'tree':
+  //       arrange_tree(skipUndoChain);
+  //       break;
+  //   }
+  // }
 
   export function arrange(skipUndoChain = false, arrangeAll = true, circleMiddle = { x: 0, y: 0 }) {
     const graph = new GraphDefinition();
@@ -646,44 +674,62 @@
       );
     }
 
-    for (const reference of value?.references) {
+    for (const reference of settings?.sortAutoLayoutReferences
+      ? settings?.sortAutoLayoutReferences(value?.references)
+      : value?.references) {
       graph.addEdge(reference.sourceId, reference.targetId);
     }
 
     graph.initialize();
 
-    const layout = GraphLayout
-      // initial circle layout
-      .createCircle(graph, circleMiddle)
-      // simulation with Hook's, Coulomb's and gravity law
-      .springyAlg()
-      // move nodes to avoid overlaps
-      .solveOverlaps()
-      // view box starts with [0,0]
-      .fixViewBox();
+    let layout: GraphLayout;
+    switch (settings?.arrangeAlg) {
+      case 'springy':
+        layout = GraphLayout
+          // initial circle layout
+          .createCircle(graph, circleMiddle)
+          // simulation with Hook's, Coulomb's and gravity law
+          .springyAlg()
+          // move nodes to avoid overlaps
+          .solveOverlaps()
+          // view box starts with [0,0]
+          .fixViewBox();
+        break;
+      case 'tree':
+        layout = GraphLayout.createTree(graph, value?.rootDesignerId);
+        break;
+    }
+
+    if (!layout) {
+      return;
+    }
 
     // layout.print();
 
-    callChange(current => {
-      return {
-        ...current,
-        tables: (current?.tables || []).map(table => {
-          const node = layout.nodes[table.designerId];
-          // console.log('POSITION', position);
-          return node
-            ? {
-                ...table,
-                needsArrange: false,
-                left: node.left,
-                top: node.top,
-              }
-            : {
-                ...table,
-                needsArrange: false,
-              };
-        }),
-      };
-    }, skipUndoChain);
+    callChange(
+      current => {
+        return {
+          ...current,
+          tables: (current?.tables || []).map(table => {
+            const node = layout.nodes[table.designerId];
+            // console.log('POSITION', position);
+            return node
+              ? {
+                  ...table,
+                  needsArrange: false,
+                  left: node.left,
+                  top: node.top,
+                }
+              : {
+                  ...table,
+                  needsArrange: false,
+                };
+          }),
+        };
+      },
+      skipUndoChain,
+      { isCalledFromArrange: true }
+    );
   }
 
   export async function exportDiagram() {
@@ -796,10 +842,38 @@
               text: `100 %`,
               onClick: changeStyleFunc('zoomKoef', 1),
             },
+            {
+              text: `120 %`,
+              onClick: changeStyleFunc('zoomKoef', 1.2),
+            },
+            {
+              text: `140 %`,
+              onClick: changeStyleFunc('zoomKoef', 1.4),
+            },
+            {
+              text: `160 %`,
+              onClick: changeStyleFunc('zoomKoef', 1.6),
+            },
+            {
+              text: `180 %`,
+              onClick: changeStyleFunc('zoomKoef', 1.8),
+            },
+            {
+              text: `200 %`,
+              onClick: changeStyleFunc('zoomKoef', 2),
+            },
           ],
         },
       ],
     ];
+  }
+
+  $: {
+    columnFilter;
+    tick().then(() => {
+      recomputeReferencePositions();
+      recomputeDomTables();
+    });
   }
 </script>
 
@@ -862,6 +936,7 @@
         onAddAllReferences={handleAddTableReferences}
         onChangeTableColor={handleChangeTableColor}
         onMoveReferences={recomputeReferencePositions}
+        {columnFilter}
         {table}
         {conid}
         {database}
@@ -896,6 +971,15 @@
       </svg>
     {/if}
   </div>
+  {#if tables?.length > 0}
+    <div class="panel">
+      <DragColumnMemory {settings} {sourceDragColumn$} {targetDragColumn$} />
+      <div class="searchbox">
+        <SearchInput bind:value={columnFilter} placeholder="Filter columns" />
+        <CloseSearchButton bind:filter={columnFilter} />
+      </div>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -907,9 +991,21 @@
   .empty {
     margin: 50px;
     font-size: 20px;
+    position: absolute;
   }
   .canvas {
     position: relative;
+  }
+  .panel {
+    position: absolute;
+    right: 16px;
+    top: 0;
+    display: flex;
+  }
+  .searchbox {
+    width: 200px;
+    display: flex;
+    margin-left: 1px;
   }
 
   svg.drag-rect {

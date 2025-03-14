@@ -1,15 +1,27 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import FontIcon from '../icons/FontIcon.svelte';
-  import { currentDropDownMenu, selectedWidget, visibleCommandPalette, visibleHamburgerMenuWidget } from '../stores';
+  import {
+    currentDropDownMenu,
+    selectedWidget,
+    visibleSelectedWidget,
+    visibleWidgetSideBar,
+    visibleHamburgerMenuWidget,
+    lockedDatabaseMode,
+    getCurrentConfig,
+  } from '../stores';
   import mainMenuDefinition from '../../../../app/src/mainMenuDefinition';
-  import { useConfig } from '../utility/metadataLoaders';
   import hasPermission from '../utility/hasPermission';
 
   let domSettings;
   let domMainMenu;
 
   const widgets = [
+    getCurrentConfig().storageDatabase && {
+      icon: 'icon admin',
+      name: 'admin',
+      title: 'Administration',
+    },
     {
       icon: 'icon database',
       name: 'database',
@@ -60,7 +72,12 @@
   ];
 
   function handleChangeWidget(name) {
-    $selectedWidget = name == $selectedWidget ? null : name;
+    if ($visibleSelectedWidget == name) {
+      $visibleWidgetSideBar = false;
+    } else {
+      $selectedWidget = name;
+      $visibleWidgetSideBar = true;
+    }
   }
   //const handleChangeWidget= e => (selectedWidget.set(item.name))
 
@@ -79,25 +96,39 @@
     const items = mainMenuDefinition({ editMenu: false });
     currentDropDownMenu.set({ left, top, items });
   }
-
-  $: config = useConfig();
 </script>
 
 <div class="main">
   {#if $visibleHamburgerMenuWidget}
-    <div class="wrapper mb-3" on:click={handleMainMenu} bind:this={domMainMenu}>
+    <div class="wrapper mb-3" on:click={handleMainMenu} bind:this={domMainMenu} data-testid="WidgetIconPanel_menu">
       <FontIcon icon="icon menu" />
     </div>
   {/if}
-  {#each widgets.filter(x => hasPermission(`widgets/${x.name}`)) as item}
-    <div class="wrapper" class:selected={item.name == $selectedWidget} on:click={() => handleChangeWidget(item.name)}>
+  {#each widgets.filter(x => x && hasPermission(`widgets/${x.name}`)) as item}
+    <div
+      class="wrapper"
+      class:selected={item.name == $visibleSelectedWidget}
+      data-testid={`WidgetIconPanel_${item.name}`}
+      on:click={() => handleChangeWidget(item.name)}
+    >
       <FontIcon icon={item.icon} title={item.title} />
     </div>
   {/each}
 
   <div class="flex1">&nbsp;</div>
 
-  <div class="wrapper" on:click={handleSettingsMenu} bind:this={domSettings}>
+  <div
+    class="wrapper"
+    title={`Toggle whether tabs from all databases are visible. Currently - ${$lockedDatabaseMode ? 'NO' : 'YES'}`}
+    on:click={() => {
+      $lockedDatabaseMode = !$lockedDatabaseMode;
+    }}
+    data-testid="WidgetIconPanel_lockDb"
+  >
+    <FontIcon icon={$lockedDatabaseMode ? 'icon locked-database-mode' : 'icon unlocked-database-mode'} />
+  </div>
+
+  <div class="wrapper" on:click={handleSettingsMenu} bind:this={domSettings} data-testid="WidgetIconPanel_settings">
     <FontIcon icon="icon settings" />
   </div>
 </div>

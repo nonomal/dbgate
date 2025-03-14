@@ -1,23 +1,26 @@
 import { showModal } from '../modals/modalTools';
 import { get } from 'svelte/store';
 import newQuery from '../query/newQuery';
-import ImportExportModal from '../modals/ImportExportModal.svelte';
 import getElectron from './getElectron';
 import { currentDatabase, extensions, getCurrentDatabase } from '../stores';
 import { getUploadListener } from './uploadFiles';
-import getConnectionLabel, { getDatabaseFileLabel } from './getConnectionLabel';
+import { getConnectionLabel, getDatabaseFileLabel } from 'dbgate-tools';
 import { apiCall } from './api';
 import openNewTab from './openNewTab';
 import { openJsonDocument } from '../tabs/JsonTab.svelte';
 import { SAVED_FILE_HANDLERS } from '../appobj/SavedFileAppObject.svelte';
 import _ from 'lodash';
 import ErrorMessageModal from '../modals/ErrorMessageModal.svelte';
+import { openImportExportTab } from './importExportTools';
+import { switchCurrentDatabase } from './common';
 
 export function canOpenByElectron(file, extensions) {
   if (!file) return false;
   const nameLower = file.toLowerCase();
   if (nameLower.endsWith('.sql')) return true;
   if (nameLower.endsWith('.diagram')) return true;
+  if (nameLower.endsWith('.qdesign')) return true;
+  if (nameLower.endsWith('.perspective')) return true;
   if (nameLower.endsWith('.json')) return true;
   if (nameLower.endsWith('.db') || nameLower.endsWith('.sqlite') || nameLower.endsWith('.sqlite3')) return true;
   for (const format of extensions.fileFormats) {
@@ -36,7 +39,7 @@ export async function openSqliteFile(filePath) {
     singleDatabase: true,
     defaultDatabase,
   });
-  currentDatabase.set({
+  switchCurrentDatabase({
     connection: resp,
     name: getDatabaseFileLabel(filePath),
   });
@@ -53,9 +56,15 @@ function getFileEncoding(filePath, fs) {
   if (!e && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) e = 'utf8';
   if (!e && buf[0] === 0xfe && buf[1] === 0xff) e = 'utf16be';
   if (!e && buf[0] === 0xff && buf[1] === 0xfe) e = 'utf16le';
-  if (!e) e = 'ascii';
+  if (!e) e = 'utf8';
 
   return e;
+}
+
+function decodeFile(buf: Uint8Array, enc: string) {
+  // TODO: use import instead of window.require. Requires doesn't work in built electron app
+  const iconv = window.require('iconv-lite');
+  return iconv.decode(buf, enc);
 }
 
 function openElectronJsonLinesFile(filePath, parsed) {
@@ -114,6 +123,8 @@ export function openElectronFileCore(filePath, extensions) {
   if (nameLower.endsWith('.sql')) {
     const encoding = getFileEncoding(filePath, fs);
     const data = fs.readFileSync(filePath, { encoding });
+    // const buf = fs.readFileSync(filePath);
+    // const data = decodeFile(buf, encoding);
 
     newQuery({
       title: parsed.name,
@@ -151,6 +162,14 @@ export function openElectronFileCore(filePath, extensions) {
     openSavedElectronFile(filePath, parsed, 'diagrams');
     return;
   }
+  if (nameLower.endsWith('.qdesign')) {
+    openSavedElectronFile(filePath, parsed, 'query');
+    return;
+  }
+  if (nameLower.endsWith('.perspective')) {
+    openSavedElectronFile(filePath, parsed, 'perspectives');
+    return;
+  }
   for (const format of extensions.fileFormats) {
     if (nameLower.endsWith(`.${format.extension}`)) {
       if (uploadListener) {
@@ -160,17 +179,30 @@ export function openElectronFileCore(filePath, extensions) {
           shortName: parsed.name,
         });
       } else {
-        showModal(ImportExportModal, {
-          openedFile: {
-            filePath,
-            storageType: format.storageType,
-            shortName: parsed.name,
-          },
-          importToCurrentTarget: true,
-          initialValues: {
+        openImportExportTab(
+          {
             sourceStorageType: format.storageType,
           },
-        });
+          {
+            openedFile: {
+              filePath,
+              storageType: format.storageType,
+              shortName: parsed.name,
+            },
+          }
+        );
+
+        // showModal(ImportExportModal, {
+        //   openedFile: {
+        //     filePath,
+        //     storageType: format.storageType,
+        //     shortName: parsed.name,
+        //   },
+        //   importToCurrentTarget: true,
+        //   initialValues: {
+        //     sourceStorageType: format.storageType,
+        //   },
+        // });
       }
     }
   }
@@ -194,11 +226,23 @@ export async function openElectronFile() {
     filters: [
       {
         name: `All supported files`,
-        extensions: ['sql', 'sqlite', 'db', 'sqlite3', 'diagram', 'json', ...getFileFormatExtensions(ext)],
+        extensions: [
+          'sql',
+          'sqlite',
+          'db',
+          'sqlite3',
+          'diagram',
+          'qdesign',
+          'perspective',
+          'json',
+          ...getFileFormatExtensions(ext),
+        ],
       },
       { name: `SQL files`, extensions: ['sql'] },
       { name: `JSON files`, extensions: ['json'] },
       { name: `Diagram files`, extensions: ['diagram'] },
+      { name: `Query designer files`, extensions: ['qdesign'] },
+      { name: `Perspective files`, extensions: ['perspective'] },
       { name: `SQLite database`, extensions: ['sqlite', 'db', 'sqlite3'] },
       ...getFileFormatFilters(ext),
     ],

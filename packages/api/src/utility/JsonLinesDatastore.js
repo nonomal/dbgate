@@ -1,38 +1,64 @@
-const lineReader = require('line-reader');
+const crypto = require('crypto');
+const fs = require('fs');
+const os = require('os');
+const rimraf = require('rimraf');
+const path = require('path');
 const AsyncLock = require('async-lock');
 const lock = new AsyncLock();
 const stableStringify = require('json-stable-stringify');
 const { evaluateCondition } = require('dbgate-sqltree');
-
-function fetchNextLineFromReader(reader) {
-  return new Promise((resolve, reject) => {
-    if (!reader.hasNextLine()) {
-      resolve(null);
-      return;
-    }
-
-    reader.nextLine((err, line) => {
-      if (err) {
-        reject(err);
-      } else {
-        resolve(line);
-      }
-    });
-  });
-}
+const requirePluginFunction = require('./requirePluginFunction');
+const esort = require('external-sorting');
+const { jsldir } = require('./directories');
+const LineReader = require('./LineReader');
 
 class JsonLinesDatastore {
-  constructor(file) {
+  constructor(file, formatterFunction) {
     this.file = file;
+    this.formatterFunction = formatterFunction;
     this.reader = null;
     this.readedDataRowCount = 0;
     this.readedSchemaRow = false;
     // this.firstRowToBeReturned = null;
     this.notifyChangedCallback = null;
     this.currentFilter = null;
+    this.currentSort = null;
+    this.rowFormatter = requirePluginFunction(formatterFunction);
+    this.sortedFiles = {};
   }
 
-  _closeReader() {
+  static async sortFile(infile, outfile, sort) {
+    const tempDir = path.join(os.tmpdir(), crypto.randomUUID());
+    fs.mkdirSync(tempDir);
+
+    await esort
+      .default({
+        input: fs.createReadStream(infile),
+        output: fs.createWriteStream(outfile),
+        deserializer: JSON.parse,
+        serializer: JSON.stringify,
+        tempDir,
+        maxHeap: 100,
+        comparer: (a, b) => {
+          for (const item of sort) {
+            const { uniqueName, order } = item;
+            if (a[uniqueName] < b[uniqueName]) {
+              return order == 'ASC' ? -1 : 1;
+            }
+            if (a[uniqueName] > b[uniqueName]) {
+              return order == 'ASC' ? 1 : -1;
+            }
+          }
+          return 0;
+        },
+      })
+      .asc();
+
+    await new Promise(resolve => rimraf(tempDir, resolve));
+  }
+
+  async _closeReader() {
+    // console.log('CLOSING READER', this.reader);
     if (!this.reader) return;
     const reader = this.reader;
     this.reader = null;
@@ -40,7 +66,8 @@ class JsonLinesDatastore {
     this.readedSchemaRow = false;
     // this.firstRowToBeReturned = null;
     this.currentFilter = null;
-    reader.close(() => {});
+    this.currentSort = null;
+    await reader.close();
   }
 
   async notifyChanged(callback) {
@@ -53,13 +80,17 @@ class JsonLinesDatastore {
     if (call) call();
   }
 
-  async _openReader() {
-    return new Promise((resolve, reject) =>
-      lineReader.open(this.file, (err, reader) => {
-        if (err) reject(err);
-        resolve(reader);
-      })
-    );
+  async _openReader(fileName) {
+    // console.log('OPENING READER', fileName);
+    // console.log(fs.readFileSync(fileName, 'utf-8'));
+
+    const fileStream = fs.createReadStream(fileName);
+    return new LineReader(fileStream);
+  }
+
+  parseLine(line) {
+    const res = JSON.parse(line);
+    return this.rowFormatter ? this.rowFormatter(res) : res;
   }
 
   async _readLine(parse) {
@@ -69,7 +100,7 @@ class JsonLinesDatastore {
     //   return res;
     // }
     for (;;) {
-      const line = await fetchNextLineFromReader(this.reader);
+      const line = await this.reader.readLine();
       if (!line) {
         // EOF
         return null;
@@ -84,14 +115,14 @@ class JsonLinesDatastore {
         }
       }
       if (this.currentFilter) {
-        const parsedLine = JSON.parse(line);
+        const parsedLine = this.parseLine(line);
         if (evaluateCondition(this.currentFilter, parsedLine)) {
           this.readedDataRowCount += 1;
           return parse ? parsedLine : true;
         }
       } else {
         this.readedDataRowCount += 1;
-        return parse ? JSON.parse(line) : true;
+        return parse ? this.parseLine(line) : true;
       }
     }
 
@@ -132,14 +163,19 @@ class JsonLinesDatastore {
     // });
   }
 
-  async _ensureReader(offset, filter) {
-    if (this.readedDataRowCount > offset || stableStringify(filter) != stableStringify(this.currentFilter)) {
+  async _ensureReader(offset, filter, sort) {
+    if (
+      this.readedDataRowCount > offset ||
+      stableStringify(filter) != stableStringify(this.currentFilter) ||
+      stableStringify(sort) != stableStringify(this.currentSort)
+    ) {
       this._closeReader();
     }
     if (!this.reader) {
-      const reader = await this._openReader();
+      const reader = await this._openReader(sort ? this.sortedFiles[stableStringify(sort)] : this.file);
       this.reader = reader;
       this.currentFilter = filter;
+      this.currentSort = sort;
     }
     // if (!this.readedSchemaRow) {
     //   const line = await this._readLine(true); // skip structure
@@ -171,13 +207,20 @@ class JsonLinesDatastore {
     });
   }
 
-  async getRows(offset, limit, filter) {
+  async getRows(offset, limit, filter, sort) {
     const res = [];
+    if (sort && !this.sortedFiles[stableStringify(sort)]) {
+      const jslid = crypto.randomUUID();
+      const sortedFile = path.join(jsldir(), `${jslid}.jsonl`);
+      await JsonLinesDatastore.sortFile(this.file, sortedFile, sort);
+      this.sortedFiles[stableStringify(sort)] = sortedFile;
+    }
     await lock.acquire('reader', async () => {
-      await this._ensureReader(offset, filter);
+      await this._ensureReader(offset, filter, sort);
       // console.log(JSON.stringify(this.currentFilter, undefined, 2));
       for (let i = 0; i < limit; i += 1) {
         const line = await this._readLine(true);
+        // console.log('READED LINE', i);
         if (line == null) break;
         res.push(line);
       }

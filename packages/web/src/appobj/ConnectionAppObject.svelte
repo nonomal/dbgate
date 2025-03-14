@@ -1,20 +1,38 @@
 <script context="module">
   export const extractKey = data => data._id;
-  export const createMatcher = props => filter => {
-    const { _id, displayName, server } = props;
-    const databases = getLocalStorage(`database_list_${_id}`) || [];
-    return filterName(filter, displayName, server, ...databases.map(x => x.name));
-  };
-  export const createChildMatcher = props => filter => {
-    if (!filter) return false;
-    const { _id } = props;
-    const databases = getLocalStorage(`database_list_${_id}`) || [];
-    return filterName(filter, ...databases.map(x => x.name));
-  };
-  export function openConnection(connection) {
+  export const createMatcher =
+    (filter, cfg = DEFAULT_CONNECTION_SEARCH_SETTINGS) =>
+    props => {
+      const { _id, displayName, server, user, engine } = props;
+      const databases = getLocalStorage(`database_list_${_id}`) || [];
+      const match = (engine || '').match(/^([^@]*)@/);
+      const engineDisplay = match ? match[1] : engine;
+
+      return filterNameCompoud(
+        filter,
+        [
+          cfg.displayName ? displayName : null,
+          cfg.server ? server : null,
+          cfg.user ? user : null,
+          cfg.engine ? engineDisplay : null,
+        ],
+        cfg.database ? databases.map(x => x.name) : []
+      );
+    };
+  export function openConnection(connection, disableExpand = false) {
+    if (connection.singleDatabase) {
+      if (getOpenedSingleDatabaseConnections().includes(connection._id)) {
+        return;
+      }
+    } else {
+      if (getOpenedConnections().includes(connection._id)) {
+        return;
+      }
+    }
+
     const config = getCurrentConfig();
     if (connection.singleDatabase) {
-      currentDatabase.set({ connection, name: connection.defaultDatabase });
+      switchCurrentDatabase({ connection, name: connection.defaultDatabase });
       apiCall('database-connections/refresh', {
         conid: connection._id,
         database: connection.defaultDatabase,
@@ -27,7 +45,14 @@
         conid: connection._id,
         keepOpen: true,
       });
-      expandedConnections.update(x => _.uniq([...x, connection._id]));
+
+      if (!disableExpand) {
+        expandedConnections.update(x => _.uniq([...x, connection._id]));
+      }
+
+      if (connection.defaultDatabase) {
+        switchCurrentDatabase({ connection, name: connection.defaultDatabase });
+      }
 
       // if (!config.runAsPortal && getCurrentSettings()['defaultAction.connectionClick'] != 'connect') {
       //   expandedConnections.update(x => _.uniq([...x, connection._id]));
@@ -42,7 +67,10 @@
       const count = getOpenedTabs().filter(closeCondition).length;
       if (count > 0) {
         showModal(ConfirmModal, {
-          message: `Closing connection will close ${count} opened tabs, continue?`,
+          message: _t('connection.closeConfirm', {
+            defaultMessage: 'Closing connection will close {count} opened tabs, continue?',
+            values: { count },
+          }),
           onConfirm: () => disconnectServerConnection(conid, false),
         });
         return;
@@ -52,6 +80,7 @@
     const electron = getElectron();
     const currentDb = getCurrentDatabase();
     openedConnections.update(list => list.filter(x => x != conid));
+    removeVolatileMapping(conid);
     if (electron) {
       apiCall('server-connections/disconnect', { conid });
     }
@@ -59,7 +88,7 @@
       if (electron) {
         apiCall('database-connections/disconnect', { conid, database: currentDb.name });
       }
-      currentDatabase.set(null);
+      switchCurrentDatabase(null);
     }
     closeMultipleTabs(closeCondition);
     // if (data.unsaved) {
@@ -80,31 +109,38 @@
   import AppObjectCore from './AppObjectCore.svelte';
   import {
     currentDatabase,
+    DEFAULT_CONNECTION_SEARCH_SETTINGS,
     expandedConnections,
     extensions,
+    focusedConnectionOrDatabase,
     getCurrentConfig,
     getCurrentDatabase,
     getCurrentSettings,
     getOpenedConnections,
+    getOpenedSingleDatabaseConnections,
     getOpenedTabs,
     openedConnections,
     openedSingleDatabaseConnections,
   } from '../stores';
-  import { filterName } from 'dbgate-tools';
+  import { filterName, filterNameCompoud } from 'dbgate-tools';
   import { showModal } from '../modals/modalTools';
   import ConfirmModal from '../modals/ConfirmModal.svelte';
   import InputTextModal from '../modals/InputTextModal.svelte';
   import openNewTab from '../utility/openNewTab';
   import { getDatabaseMenuItems } from './DatabaseAppObject.svelte';
   import getElectron from '../utility/getElectron';
-  import getConnectionLabel from '../utility/getConnectionLabel';
   import { getDatabaseList, useUsedApps } from '../utility/metadataLoaders';
   import { getLocalStorage } from '../utility/storageCache';
-  import { apiCall } from '../utility/api';
-  import ImportDatabaseDumpModal from '../modals/ImportDatabaseDumpModal.svelte';
-  import { closeMultipleTabs } from '../widgets/TabsPanel.svelte';
+  import { apiCall, removeVolatileMapping } from '../utility/api';
+  import { closeMultipleTabs } from '../tabpanel/TabsPanel.svelte';
   import AboutModal from '../modals/AboutModal.svelte';
-import { tick } from 'svelte';
+  import { tick } from 'svelte';
+  import { getConnectionLabel } from 'dbgate-tools';
+  import hasPermission from '../utility/hasPermission';
+  import { switchCurrentDatabase } from '../utility/common';
+  import { getConnectionClickActionSetting } from '../settings/settingsTools';
+  import { _t } from '../translations';
+  import { isProApp } from '../utility/proTools';
 
   export let data;
   export let passProps;
@@ -117,8 +153,8 @@ import { tick } from 'svelte';
 
   const electron = getElectron();
 
-  const handleConnect = () => {
-    openConnection(data);
+  const handleConnect = (disableExpand = false) => {
+    openConnection(data, disableExpand);
   };
 
   const handleOpenConnectionTab = () => {
@@ -132,32 +168,77 @@ import { tick } from 'svelte';
     });
   };
 
-  const handleClick = async () => {
-    const config = getCurrentConfig();
-    if (config.runAsPortal) {
-      await tick();
-      handleConnect();
-      return;
-    }
+  const handleDoubleClick = async () => {
+    // const config = getCurrentConfig();
+    // if (config.runAsPortal) {
+    //   await tick();
+    //   handleConnect(true);
+    //   return;
+    // }
+
     if ($openedSingleDatabaseConnections.includes(data._id)) {
-      currentDatabase.set({ connection: data, name: data.defaultDatabase });
+      switchCurrentDatabase({ connection: data, name: data.defaultDatabase });
       return;
     }
     if ($openedConnections.includes(data._id)) {
       return;
     }
+    await tick();
+    handleConnect(true);
 
-    if (getCurrentSettings()['defaultAction.connectionClick'] == 'connect') {
+    // if (getCurrentSettings()['defaultAction.connectionClick'] == 'openDetails') {
+    //   handleOpenConnectionTab();
+    // } else {
+    //   await tick();
+    //   handleConnect();
+    // }
+  };
+
+  const handleClick = async e => {
+    // focusedConnectionOrDatabase.set({
+    //   conid: data?._id,
+    //   connection: data,
+    //   database: data.singleDatabase ? data.defaultDatabase : null,
+    // });
+
+    const config = getCurrentConfig();
+
+    const connectionClickAction = getConnectionClickActionSetting();
+    if (connectionClickAction == 'openDetails') {
+      if (config.runAsPortal == false && !config.storageDatabase) {
+        openNewTab({
+          title: getConnectionLabel(data),
+          icon: 'img connection',
+          tabComponent: 'ConnectionTab',
+          tabPreviewMode: true,
+          props: {
+            conid: data._id,
+          },
+        });
+      }
+    }
+    if (connectionClickAction == 'connect') {
       await tick();
       handleConnect();
-    } else {
-      handleOpenConnectionTab();
     }
   };
 
-  const handleSqlRestore = () => {
-    showModal(ImportDatabaseDumpModal, {
+  const handleMouseDown = () => {
+    focusedConnectionOrDatabase.set({
+      conid: data?._id,
       connection: data,
+      database: data.singleDatabase ? data.defaultDatabase : null,
+    });
+  };
+
+  const handleRestoreDatabase = () => {
+    openNewTab({
+      title: 'Restore #',
+      icon: 'img db-restore',
+      tabComponent: 'RestoreDatabaseTab',
+      props: {
+        conid: data._id,
+      },
     });
   };
 
@@ -172,7 +253,10 @@ import { tick } from 'svelte';
     };
     const handleDelete = () => {
       showModal(ConfirmModal, {
-        message: `Really delete connection ${getConnectionLabel(data)}?`,
+        message: _t('connection.deleteConfirm', {
+          defaultMessage: 'Really delete connection {name}?',
+          values: { name: getConnectionLabel(data) },
+        }),
         onConfirm: () => apiCall('connections/delete', data),
       });
     };
@@ -185,14 +269,24 @@ import { tick } from 'svelte';
     };
     const handleCreateDatabase = () => {
       showModal(InputTextModal, {
-        header: 'Create database',
+        header: _t('connection.createDatabase', { defaultMessage: 'Create database' }),
         value: 'newdb',
-        label: 'Database name',
+        label: _t('connection.databaseName', { defaultMessage: 'Database name' }),
         onConfirm: name =>
           apiCall('server-connections/create-database', {
             conid: data._id,
             name,
           }),
+      });
+    };
+    const handleServerSummary = () => {
+      openNewTab({
+        title: getConnectionLabel(data),
+        icon: 'img server',
+        tabComponent: 'ServerSummaryTab',
+        props: {
+          conid: data._id,
+        },
       });
     };
     const handleNewQuery = () => {
@@ -202,6 +296,7 @@ import { tick } from 'svelte';
         icon: 'img sql-file',
         tooltip,
         tabComponent: 'QueryTab',
+        focused: true,
         props: {
           conid: data._id,
         },
@@ -209,41 +304,58 @@ import { tick } from 'svelte';
     };
 
     return [
-      config.runAsPortal == false && [
-        {
-          text: $openedConnections.includes(data._id) ? 'View details' : 'Edit',
-          onClick: handleOpenConnectionTab,
-        },
-        !$openedConnections.includes(data._id) && {
-          text: 'Delete',
-          onClick: handleDelete,
-        },
-        {
-          text: 'Duplicate',
-          onClick: handleDuplicate,
-        },
-      ],
       !data.singleDatabase && [
         !$openedConnections.includes(data._id) && {
-          text: 'Connect',
+          text: _t('connection.connect', { defaultMessage: 'Connect' }),
           onClick: handleConnect,
+          isBold: true,
         },
-        { onClick: handleNewQuery, text: 'New query', isNewQuery: true },
-        $openedConnections.includes(data._id) &&
-          data.status && {
-            text: 'Refresh',
-            onClick: handleRefresh,
-          },
         $openedConnections.includes(data._id) && {
-          text: 'Disconnect',
+          text: _t('connection.disconnect', { defaultMessage: 'Disconnect' }),
           onClick: handleDisconnect,
         },
+      ],
+      { divider: true },
+      config.runAsPortal == false &&
+        !config.storageDatabase && [
+          {
+            text: $openedConnections.includes(data._id)
+              ? _t('connection.viewDetails', { defaultMessage: 'View details' })
+              : _t('connection.edit', { defaultMessage: 'Edit' }),
+            onClick: handleOpenConnectionTab,
+          },
+          !$openedConnections.includes(data._id) && {
+            text: _t('connection.delete', { defaultMessage: 'Delete' }),
+            onClick: handleDelete,
+          },
+          {
+            text: _t('connection.duplicate', { defaultMessage: 'Duplicate' }),
+            onClick: handleDuplicate,
+          },
+        ],
+      { divider: true },
+      !data.singleDatabase && [
+        hasPermission(`dbops/query`) && {
+          onClick: handleNewQuery,
+          text: _t('connection.newQuery', { defaultMessage: 'New Query (server)' }),
+          isNewQuery: true,
+        },
         $openedConnections.includes(data._id) &&
+          data.status && {
+            text: _t('connection.refresh', { defaultMessage: 'Refresh' }),
+            onClick: handleRefresh,
+          },
+        hasPermission(`dbops/createdb`) &&
+          $openedConnections.includes(data._id) &&
           driver?.supportedCreateDatabase &&
           !data.isReadOnly && {
-            text: 'Create database',
+            text: _t('connection.createDatabase', { defaultMessage: 'Create database' }),
             onClick: handleCreateDatabase,
           },
+        driver?.supportsServerSummary && {
+          text: _t('connection.serverSummary', { defaultMessage: 'Server summary' }),
+          onClick: handleServerSummary,
+        },
       ],
       data.singleDatabase && [
         { divider: true },
@@ -257,7 +369,10 @@ import { tick } from 'svelte';
         ),
       ],
 
-      driver?.databaseEngineTypes?.includes('sql') && { onClick: handleSqlRestore, text: 'Restore/import SQL dump' },
+      driver?.supportsDatabaseRestore &&
+        isProApp() &&
+        hasPermission(`dbops/sql-dump/import`) &&
+        !data.isReadOnly && { onClick: handleRestoreDatabase, text: 'Restore database backup' },
     ];
   };
 
@@ -270,7 +385,11 @@ import { tick } from 'svelte';
     } else {
       extInfo = data.engine;
       engineStatusIcon = 'img warn';
-      engineStatusTitle = `Engine driver ${data.engine} not found, review installed plugins and change engine in edit connection dialog`;
+      engineStatusTitle = _t('connection.engineDriverNotFound', {
+        defaultMessage:
+          'Engine driver {engine} not found, review installed plugins and change engine in edit connection dialog',
+        values: { engine: data.engine },
+      });
     }
   }
 
@@ -299,21 +418,28 @@ import { tick } from 'svelte';
   title={getConnectionLabel(data, { showUnsaved: true })}
   icon={data.singleDatabase ? 'img database' : 'img server'}
   isBold={data.singleDatabase
-    ? _.get($currentDatabase, 'connection._id') == data._id && _.get($currentDatabase, 'name') == data.defaultDatabase
-    : _.get($currentDatabase, 'connection._id') == data._id}
+    ? $currentDatabase?.connection?._id == data._id && $currentDatabase?.name == data.defaultDatabase
+    : $currentDatabase?.connection?._id == data._id}
   statusIcon={statusIcon || engineStatusIcon}
   statusTitle={statusTitle || engineStatusTitle}
+  statusTitleToCopy={statusTitle || engineStatusTitle}
   statusIconBefore={data.isReadOnly ? 'icon lock' : null}
   {extInfo}
   colorMark={passProps?.connectionColorFactory && passProps?.connectionColorFactory({ conid: data._id })}
   menu={getContextMenu}
   on:click={handleClick}
-  on:click
+  on:mousedown={handleMouseDown}
+  on:dblclick
   on:expand
-  on:dblclick={handleConnect}
+  on:dblclick={handleDoubleClick}
   on:middleclick={() => {
     _.flattenDeep(getContextMenu())
       .find(x => x.isNewQuery)
       .onClick();
   }}
+  isChoosed={data._id == $focusedConnectionOrDatabase?.conid &&
+    (data.singleDatabase
+      ? $focusedConnectionOrDatabase?.database == data.defaultDatabase
+      : !$focusedConnectionOrDatabase?.database)}
+  disableBoldScroll={!!$focusedConnectionOrDatabase}
 />

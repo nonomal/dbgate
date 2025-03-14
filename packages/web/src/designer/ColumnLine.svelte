@@ -1,11 +1,15 @@
 <script lang="ts">
   import { findForeignKeyForColumn } from 'dbgate-tools';
+  import InlineButton from '../buttons/InlineButton.svelte';
+  import ToolbarButton from '../buttons/ToolbarButton.svelte';
 
   import ColumnLabel from '../elements/ColumnLabel.svelte';
 
   import CheckboxField from '../forms/CheckboxField.svelte';
+  import { plusExpandIcon } from '../icons/expandIcons';
   import FontIcon from '../icons/FontIcon.svelte';
   import contextMenu from '../utility/contextMenu';
+  import SortOrderIcon from './SortOrderIcon.svelte';
   export let column;
   export let table;
   export let designer;
@@ -18,13 +22,27 @@
   export let onAddReferenceByColumn;
   export let onSelectColumn;
   export let settings;
+  export let nestingSupported = null;
+  export let isExpandable = false;
+  export let isExpanded = false;
+  export let expandLevel = 0;
+  export let toggleExpanded = null;
 
   $: designerColumn = (designer.columns || []).find(
     x => x.designerId == designerId && x.columnName == column.columnName
   );
+  $: foreignKey = findForeignKeyForColumn(table, column);
 
   function createMenu() {
-    const foreignKey = findForeignKeyForColumn(table, column);
+    if (settings?.columnMenu) {
+      return settings?.columnMenu({
+        designer,
+        designerId,
+        column,
+        foreignKey,
+      });
+    }
+
     const setSortOrder = sortOrder => {
       onChangeColumn(
         {
@@ -47,6 +65,11 @@
       foreignKey && { text: 'Add reference', onClick: addReference },
     ];
   }
+
+  $: sortOrderProps = settings?.getSortOrderProps ? settings?.getSortOrderProps(designerId, column.columnName) : null;
+  $: iconOverride = settings?.getColumnIconOverride
+    ? settings?.getColumnIconOverride(designerId, column.columnName)
+    : null;
 </script>
 
 <div
@@ -98,33 +121,56 @@
     })}
   use:contextMenu={settings?.canSelectColumns ? createMenu : '__no_menu'}
 >
+  {#if nestingSupported}
+    <span class="expandColumnIcon" style={`margin-right: ${5 + expandLevel * 10}px`}>
+      <FontIcon
+        icon={isExpandable ? plusExpandIcon(isExpanded) : 'icon invisible-box'}
+        on:click={() => {
+          toggleExpanded(!isExpanded);
+        }}
+      />
+    </span>
+  {/if}
+
   {#if settings?.allowColumnOperations}
     <CheckboxField
-      checked={!!(designer.columns || []).find(
-        x => x.designerId == designerId && x.columnName == column.columnName && x.isOutput
-      )}
+      checked={settings?.isColumnChecked
+        ? settings?.isColumnChecked(designerId, column)
+        : !!(designer.columns || []).find(
+            x => x.designerId == designerId && x.columnName == column.columnName && x.isOutput
+          )}
       on:change={e => {
-        if (e.target.checked) {
-          onChangeColumn(
-            {
-              ...column,
-              designerId,
-            },
-            col => ({ ...col, isOutput: true })
-          );
+        if (settings?.setColumnChecked) {
+          settings?.setColumnChecked(designerId, column, e.target.checked);
         } else {
-          onChangeColumn(
-            {
-              ...column,
-              designerId,
-            },
-            col => ({ ...col, isOutput: false })
-          );
+          if (e.target.checked) {
+            onChangeColumn(
+              {
+                ...column,
+                designerId,
+              },
+              col => ({ ...col, isOutput: true })
+            );
+          } else {
+            onChangeColumn(
+              {
+                ...column,
+                designerId,
+              },
+              col => ({ ...col, isOutput: false })
+            );
+          }
         }
       }}
     />
   {/if}
-  <ColumnLabel {...column} foreignKey={findForeignKeyForColumn(table, column)} forceIcon />
+  <ColumnLabel
+    {...column}
+    columnName={settings?.getColumnDisplayName ? settings?.getColumnDisplayName(column) : column.columnName}
+    {foreignKey}
+    forceIcon
+    {iconOverride}
+  />
   {#if designerColumn?.filter}
     <FontIcon icon="img filter" />
   {/if}
@@ -138,11 +184,19 @@
     <FontIcon icon="img group" />
   {/if}
 
+  {#if sortOrderProps}
+    <SortOrderIcon {...sortOrderProps} />
+  {/if}
+
+  {#if settings?.isColumnFiltered && settings?.isColumnFiltered(designerId, column.columnName)}
+    <FontIcon icon="img filter" />
+  {/if}
+
   {#if designer?.style?.showNullability || designer?.style?.showDataType}
     <div class="space" />
     {#if designer?.style?.showDataType && column?.dataType}
       <div class="ml-2">
-        {column?.dataType.toLowerCase()}
+        {(column?.displayedDataType || column?.dataType).toLowerCase()}
       </div>
     {/if}
     {#if designer?.style?.showNullability}
@@ -150,6 +204,12 @@
         {column?.notNull ? 'NOT NULL' : 'NULL'}
       </div>
     {/if}
+  {/if}
+
+  {#if foreignKey && settings?.addDesignerForeignKey && settings?.canAddDesignerForeignKey && settings?.canAddDesignerForeignKey(designerId, column.columnName)}
+    <span class="icon-button" on:mousedown={() => settings?.addDesignerForeignKey(designerId, column.columnName)}>
+      <FontIcon icon="icon arrow-right" />
+    </span>
   {/if}
 </div>
 
@@ -168,5 +228,14 @@
   }
   .space {
     flex-grow: 1;
+  }
+
+  .icon-button {
+    margin-left: 4px;
+    cursor: pointer;
+  }
+  .icon-button:hover {
+    background: var(--theme-bg-2);
+    color: var(--theme-font-hover);
   }
 </style>

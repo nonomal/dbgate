@@ -8,12 +8,13 @@
     leftPanelWidth,
     openedSnackbars,
     selectedWidget,
+    visibleWidgetSideBar,
     visibleCommandPalette,
     visibleTitleBar,
     visibleToolbar,
   } from './stores';
-  import TabsPanel from './widgets/TabsPanel.svelte';
-  import TabRegister from './TabRegister.svelte';
+  import TabsPanel from './tabpanel/TabsPanel.svelte';
+  import TabRegister from './tabpanel/TabRegister.svelte';
   import CommandPalette from './commands/CommandPalette.svelte';
   import Toolbar from './widgets/Toolbar.svelte';
   import splitterDrag from './utility/splitterDrag';
@@ -26,10 +27,12 @@
   import TitleBar from './widgets/TitleBar.svelte';
   import FontIcon from './icons/FontIcon.svelte';
   import getElectron from './utility/getElectron';
+  import TabsContainer from './tabpanel/TabsContainer.svelte';
+  import MultiTabsContainer from './tabpanel/MultiTabsContainer.svelte';
 
   $: currentThemeType = $currentThemeDefinition?.themeType == 'dark' ? 'theme-type-dark' : 'theme-type-light';
 
-  $: themeStyle = `<style id="themePlugin">${$currentThemeDefinition?.themeCss}</style>`;
+  $: themeStyle = `<st` + `yle id="themePlugin">${$currentThemeDefinition?.themeCss}</st` + `yle>`;
 
   const isElectron = !!getElectron();
 </script>
@@ -63,18 +66,15 @@
   <div class="statusbar">
     <StatusBar />
   </div>
-  {#if $selectedWidget}
+  {#if $selectedWidget && $visibleWidgetSideBar}
     <div class="leftpanel">
       <WidgetContainer />
     </div>
   {/if}
-  <div class="tabs">
-    <TabsPanel />
+  <div class="tabs-container">
+    <MultiTabsContainer />
   </div>
-  <div class="content">
-    <TabRegister />
-  </div>
-  {#if $selectedWidget}
+  {#if $selectedWidget && $visibleWidgetSideBar}
     <div
       class="horizontal-split-handle splitter"
       use:splitterDrag={'clientX'}
@@ -134,23 +134,6 @@
     background-color: var(--theme-bg-1);
     display: flex;
   }
-  .tabs {
-    position: fixed;
-    top: var(--dim-header-top);
-    left: var(--dim-content-left);
-    height: var(--dim-tabs-panel-height);
-    right: 0;
-    background-color: var(--theme-bg-1);
-    border-top: 1px solid var(--theme-border);
-  }
-  .content {
-    position: fixed;
-    top: var(--dim-content-top);
-    left: var(--dim-content-left);
-    bottom: var(--dim-statusbar-height);
-    right: 0;
-    background-color: var(--theme-bg-1);
-  }
   .commads {
     position: fixed;
     top: var(--dim-header-top);
@@ -205,5 +188,14 @@
   }
   .big-icon {
     font-size: 20pt;
+  }
+
+  .tabs-container {
+    position: fixed;
+    top: var(--dim-header-top);
+    left: var(--dim-content-left);
+    bottom: var(--dim-statusbar-height);
+    right: 0;
+    background-color: var(--theme-bg-1);
   }
 </style>

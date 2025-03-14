@@ -1,4 +1,4 @@
-const { SqlDumper, arrayToHexString } = global.DBGATE_TOOLS;
+const { SqlDumper, arrayToHexString } = global.DBGATE_PACKAGES['dbgate-tools'];
 const _isArray = require('lodash/isArray');
 
 class Dumper extends SqlDumper {
@@ -32,11 +32,19 @@ class Dumper extends SqlDumper {
   }
 
   changeColumn(oldcol, newcol, constraints) {
+    if (!oldcol.notNull) {
+      this.fillNewNotNullDefaults({
+        ...newcol,
+        columnName: oldcol.columnName,
+      });
+    }
     this.put('^alter ^table %f ^change ^column %i %i ', oldcol, oldcol.columnName, newcol.columnName);
     this.columnDefinition(newcol);
     this.inlineConstraints(constraints);
     this.endCommand();
   }
+
+  autoIncrement() {}
 
   specialColumnOptions(column) {
     if (column.isUnsigned) {
@@ -44,6 +52,9 @@ class Dumper extends SqlDumper {
     }
     if (column.isZerofill) {
       this.put('^zerofill ');
+    }
+    if (column.autoIncrement) {
+      this.put('^auto_increment ');
     }
   }
 
@@ -83,6 +94,50 @@ class Dumper extends SqlDumper {
 
   putByteArrayValue(value) {
     this.putRaw(`unhex('${arrayToHexString(value)}')`);
+  }
+
+  selectScopeIdentity() {
+    this.put('^select ^last_insert_id()');
+  }
+
+  callableTemplate(func) {
+    const parameters = (func.parameters || []).filter(x => x.parameterMode != 'RETURN');
+
+    const putParameters = (parameters, delimiter) => {
+      this.putCollection(delimiter, parameters || [], param => {
+        if (param.parameterMode == 'IN') {
+          this.putRaw('@' + param.parameterName);
+        } else {
+          this.putRaw('@' + param.parameterName + 'Output');
+        }
+      });
+    };
+
+    const putSetParamters = parameters => {
+      for (const param of parameters || []) {
+        if (param.parameterMode == 'IN') {
+          this.put('SET @%s = :%s', param.parameterName, param.parameterName);
+          this.endCommand();
+        }
+      }
+      this.put('&n');
+    };
+
+    if (func.objectTypeField == 'procedures') {
+      putSetParamters(func.parameters);
+      this.put('^call %f(&>&n', func);
+      putParameters(parameters, ',&n');
+      this.put('&<&n)');
+      this.endCommand();
+    }
+
+    if (func.objectTypeField == 'functions') {
+      putSetParamters(parameters);
+      this.put('^select %f(&>&n', func);
+      putParameters(parameters, ',&n');
+      this.put('&<&n)');
+      this.endCommand();
+    }
   }
 }
 

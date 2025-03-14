@@ -22,7 +22,7 @@
     toolbar: true,
     isRelatedToTab: true,
     icon: 'icon close',
-    testEnabled: () => getCurrentEditor()?.canSave(),
+    testEnabled: () => getCurrentEditor()?.canResetChanges(),
     onClick: () => getCurrentEditor().reset(),
   });
 </script>
@@ -39,27 +39,24 @@
   import _ from 'lodash';
   import registerCommand from '../commands/registerCommand';
 
-  import ColumnLabel from '../elements/ColumnLabel.svelte';
-  import ConstraintLabel from '../elements/ConstraintLabel.svelte';
-  import ForeignKeyObjectListControl from '../elements/ForeignKeyObjectListControl.svelte';
-
-  import { extensions } from '../stores';
+  import { extensions, lastUsedDefaultActions } from '../stores';
   import useEditorData from '../query/useEditorData';
   import TableEditor from '../tableeditor/TableEditor.svelte';
   import createActivator, { getActiveComponent } from '../utility/createActivator';
 
-  import { useConnectionInfo, useDatabaseInfo, useDbCore } from '../utility/metadataLoaders';
+  import { useConnectionInfo, useDatabaseInfo, useDbCore, useSchemaList } from '../utility/metadataLoaders';
   import { showModal } from '../modals/modalTools';
   import ConfirmSqlModal from '../modals/ConfirmSqlModal.svelte';
   import ErrorMessageModal from '../modals/ErrorMessageModal.svelte';
   import { showSnackbarSuccess } from '../utility/snackbar';
-  import InputTextModal from '../modals/InputTextModal.svelte';
-  import { changeTab } from '../utility/common';
-  import StatusBarTabItem from '../widgets/StatusBarTabItem.svelte';
   import openNewTab from '../utility/openNewTab';
   import { apiCall } from '../utility/api';
   import ToolStripContainer from '../buttons/ToolStripContainer.svelte';
   import ToolStripCommandButton from '../buttons/ToolStripCommandButton.svelte';
+  import ToolStripButton from '../buttons/ToolStripButton.svelte';
+  import hasPermission from '../utility/hasPermission';
+  import { changeTab, markTabSaved, markTabUnsaved } from '../utility/common';
+  import { getBoolSettingsValue } from '../settings/settingsTools';
 
   export let tabid;
   export let conid;
@@ -67,9 +64,11 @@
   export let schemaName;
   export let pureName;
   export let objectTypeField = 'tables';
+  export let tabPreviewMode;
   let domEditor;
 
   let savedName;
+  let resetCounter = 0;
 
   export const activator = createActivator('TableStructureTab', true);
 
@@ -78,39 +77,21 @@
   $: tableInfoWithPairingId = $tableInfo ? generateTablePairingId($tableInfo) : null;
   $: connection = useConnectionInfo({ conid });
   $: driver = findEngineDriver($connection, $extensions);
+  $: schemaList = useSchemaList({ conid, database });
 
   const { editorState, editorValue, setEditorData, clearEditorData } = useEditorData({ tabid });
 
   $: showTable = $editorValue ? $editorValue.current : tableInfoWithPairingId;
 
   export function canSave() {
-    return objectTypeField == 'tables' && !!$editorValue;
+    return objectTypeField == 'tables' && !!$editorValue && !$connection?.isReadOnly;
+  }
+
+  export function canResetChanges() {
+    return canSave() && !!$editorValue.base;
   }
 
   export function save() {
-    if ($editorValue.base) {
-      doSave(null);
-    } else {
-      showModal(InputTextModal, {
-        header: 'Set table name',
-        value: savedName || 'newTable',
-        label: 'Table name',
-        onConfirm: name => {
-          savedName = name;
-          setEditorData(tbl => ({
-            base: tbl.base,
-            current: {
-              ...tbl.current,
-              pureName: name,
-            },
-          }));
-          doSave(name);
-        },
-      });
-    }
-  }
-
-  function doSave(createTableName) {
     const { sql, recreates } = getAlterTableScript(
       $editorValue.base,
       extendTableInfo(fillConstraintNames($editorValue.current, driver.dialect)),
@@ -124,38 +105,38 @@
       sql,
       recreates,
       onConfirm: () => {
-        handleConfirmSql(sql, createTableName);
+        handleConfirmSql(sql);
       },
       engine: driver.engine,
     });
   }
 
-  async function handleConfirmSql(sql, createTableName) {
-    const resp = await apiCall('database-connections/run-script', { conid, database, sql });
+  async function handleConfirmSql(sql) {
+    const resp = await apiCall('database-connections/run-script', { conid, database, sql, useTransaction: true });
     const { errorMessage } = resp || {};
     if (errorMessage) {
       showModal(ErrorMessageModal, { title: 'Error when saving', message: errorMessage });
     } else {
-      if (createTableName) {
-        changeTab(tabid, tab => ({
-          ...tab,
-          title: createTableName,
-          props: {
-            ...tab.props,
-            pureName: createTableName,
-          },
-        }));
-      }
-
+      markTabSaved(tabid);
       await apiCall('database-connections/sync-model', { conid, database });
       showSnackbarSuccess('Saved to database');
+      const isCreateTable = $editorValue?.base == null;
+      const tableName = _.pick($editorValue.current, ['pureName', 'schemaName']);
       clearEditorData();
+      if (isCreateTable) {
+        changeTab(tabid, tab => ({
+          ...tab,
+          title: tableName.pureName,
+          props: { ...tab.props, ...tableName },
+        }));
+      }
     }
   }
 
   export async function reset() {
     await apiCall('database-connections/sync-model', { conid, database });
-    clearEditorData();
+    await clearEditorData();
+    resetCounter++;
   }
 
   // $: {
@@ -169,9 +150,12 @@
     bind:this={domEditor}
     tableInfo={showTable}
     dbInfo={$dbInfo}
+    schemaList={$schemaList}
     {driver}
-    setTableInfo={objectTypeField == 'tables'
-      ? tableInfoUpdater =>
+    {resetCounter}
+    isCreateTable={objectTypeField == 'tables' && $editorValue && !$editorValue?.base}
+    setTableInfo={objectTypeField == 'tables' && !$connection?.isReadOnly && hasPermission(`dbops/model/edit`)
+      ? tableInfoUpdater => {
           setEditorData(tbl =>
             tbl
               ? {
@@ -182,35 +166,74 @@
                   base: tableInfoWithPairingId,
                   current: tableInfoUpdater(tableInfoWithPairingId),
                 }
-          )
+          );
+          markTabUnsaved(tabid);
+        }
       : null}
   />
   <svelte:fragment slot="toolstrip">
-    <ToolStripCommandButton command="tableStructure.save" />
+    <ToolStripButton
+      icon={'icon table'}
+      iconAfter="icon arrow-link"
+      on:click={() => {
+        if (tabPreviewMode && getBoolSettingsValue('defaultAction.useLastUsedAction', true)) {
+          lastUsedDefaultActions.update(actions => ({
+            ...actions,
+            [objectTypeField]: 'openTable',
+          }));
+        }
+
+        openNewTab({
+          title: pureName,
+          icon: objectTypeField == 'tables' ? 'img table' : 'img view',
+          tabComponent: objectTypeField == 'tables' ? 'TableDataTab' : 'ViewDataTab',
+          tabPreviewMode: true,
+          props: {
+            schemaName,
+            pureName,
+            conid,
+            database,
+            objectTypeField,
+            defaultActionId: 'openTable',
+          },
+        });
+      }}>Data</ToolStripButton
+    >
+
+    <ToolStripButton
+      icon="img sql-file"
+      iconAfter="icon arrow-link"
+      on:click={() => {
+        if (tabPreviewMode && getBoolSettingsValue('defaultAction.useLastUsedAction', true)) {
+          lastUsedDefaultActions.update(actions => ({
+            ...actions,
+            [objectTypeField]: 'showSql',
+          }));
+        }
+
+        openNewTab({
+          title: pureName,
+          icon: 'img sql-file',
+          tabComponent: 'SqlObjectTab',
+          tabPreviewMode: true,
+          props: {
+            schemaName,
+            pureName,
+            conid,
+            database,
+            objectTypeField,
+            defaultActionId: 'showSql',
+          },
+        });
+      }}>SQL</ToolStripButton
+    >
+
+    <ToolStripCommandButton
+      command="tableStructure.save"
+      buttonLabel={$editorValue?.base ? 'Alter table' : 'Create table'}
+    />
     <ToolStripCommandButton command="tableStructure.reset" />
     <ToolStripCommandButton command="tableEditor.addColumn" />
-    <ToolStripCommandButton command="tableEditor.addIndex" />
+    <ToolStripCommandButton command="tableEditor.addIndex" hideDisabled />
   </svelte:fragment>
 </ToolStripContainer>
-
-{#if objectTypeField == 'tables'}
-  <StatusBarTabItem
-    text="Open data"
-    icon="icon table"
-    clickable
-    onClick={() => {
-      openNewTab({
-        title: pureName,
-        icon: 'img table',
-        tabComponent: 'TableDataTab',
-        props: {
-          schemaName,
-          pureName,
-          conid,
-          database,
-          objectTypeField: 'tables',
-        },
-      });
-    }}
-  />
-{/if}

@@ -1,6 +1,6 @@
 <script lang="ts" context="module">
   export const extractKey = data => data.name;
-  export const createMatcher = data => filter => filterName(filter, data.name);
+  export const createMatcher = filter => data => filterName(filter, data.name);
 </script>
 
 <script lang="ts">
@@ -17,6 +17,9 @@
   import InputTextModal from '../modals/InputTextModal.svelte';
   import ErrorMessageModal from '../modals/ErrorMessageModal.svelte';
   import { apiCall } from '../utility/api';
+  import hasPermission from '../utility/hasPermission';
+  import { isProApp } from '../utility/proTools';
+  import { extractShellConnection } from '../impexp/createImpExpScript';
 
   export let data;
 
@@ -64,10 +67,7 @@
         
 await dbgateApi.deployDb(${JSON.stringify(
           {
-            connection: {
-              ..._.omit($currentDatabase.connection, '_id', 'displayName'),
-              database: $currentDatabase.name,
-            },
+            connection: extractShellConnection($currentDatabase.connection, $currentDatabase.name),
             modelFolder: `archive:${data.name}`,
           },
           undefined,
@@ -97,13 +97,36 @@ await dbgateApi.deployDb(${JSON.stringify(
         title: 'Compare',
         icon: 'img compare',
         tabComponent: 'CompareModelTab',
+        props: {
+          conid: $currentDatabase?.connection?._id,
+          database: $currentDatabase?.name,
+        }
       },
       {
         editor: {
           sourceConid: '__model',
           sourceDatabase: `archive:${data.name}`,
-          targetConid: _.get($currentDatabase, 'connection._id'),
-          targetDatabase: _.get($currentDatabase, 'name'),
+          targetConid: $currentDatabase?.connection?._id,
+          targetDatabase: $currentDatabase?.name,
+        },
+      }
+    );
+  };
+
+  const handleOpenDuplicatorTab = () => {
+    openNewTab(
+      {
+        title: data.name,
+        icon: 'img duplicator',
+        tabComponent: 'DataDuplicatorTab',
+        props: {
+          conid: $currentDatabase?.connection?._id,
+          database: $currentDatabase?.name,
+        },
+      },
+      {
+        editor: {
+          archiveFolder: data.name,
         },
       }
     );
@@ -115,11 +138,14 @@ await dbgateApi.deployDb(${JSON.stringify(
       data.name != 'default' && { text: 'Rename', onClick: handleRename },
       data.name != 'default' &&
         $currentDatabase && [
-          { text: 'Generate deploy DB SQL - experimental', onClick: handleGenerateDeploySql },
-          { text: 'Shell: Deploy DB - experimental', onClick: handleGenerateDeployScript },
+          { text: 'Data duplicator', onClick: handleOpenDuplicatorTab },
+          { text: 'Generate deploy DB SQL', onClick: handleGenerateDeploySql },
+          { text: 'Shell: Deploy DB', onClick: handleGenerateDeployScript },
         ],
 
       data.name != 'default' &&
+        hasPermission('dbops/model/compare') &&
+        isProApp() &&
         _.get($currentDatabase, 'connection._id') && {
           onClick: handleCompareWithCurrentDb,
           text: `Compare with ${_.get($currentDatabase, 'name')}`,

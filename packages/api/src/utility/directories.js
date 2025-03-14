@@ -1,20 +1,24 @@
 const os = require('os');
 const path = require('path');
 const fs = require('fs');
+const _ = require('lodash');
 const cleanDirectory = require('./cleanDirectory');
 const platformInfo = require('./platformInfo');
 const processArgs = require('./processArgs');
 const consoleObjectWriter = require('../shell/consoleObjectWriter');
+const { getLogger } = require('dbgate-tools');
+
+let logsFilePath;
 
 const createDirectories = {};
 const ensureDirectory = (dir, clean) => {
   if (!createDirectories[dir]) {
     if (clean && fs.existsSync(dir) && !platformInfo.isForkedApi) {
-      console.log(`Cleaning directory ${dir}`);
-      cleanDirectory(dir);
+      getLogger('directories').info(`Cleaning directory ${dir}`);
+      cleanDirectory(dir, _.isNumber(clean) ? clean : null);
     }
     if (!fs.existsSync(dir)) {
-      console.log(`Creating directory ${dir}`);
+      getLogger('directories').info(`Creating directory ${dir}`);
       fs.mkdirSync(dir);
     }
     createDirectories[dir] = true;
@@ -38,20 +42,28 @@ function datadir() {
   return dir;
 }
 
-const dirFunc = (dirname, clean = false) => () => {
-  const dir = path.join(datadir(), dirname);
-  ensureDirectory(dir, clean);
+const dirFunc =
+  (dirname, clean, subdirs = []) =>
+  () => {
+    const dir = path.join(datadir(), dirname);
+    ensureDirectory(dir, clean);
+    for (const subdir of subdirs) {
+      ensureDirectory(path.join(dir, subdir), false);
+    }
 
-  return dir;
-};
+    return dir;
+  };
 
 const jsldir = dirFunc('jsl', true);
 const rundir = dirFunc('run', true);
 const uploadsdir = dirFunc('uploads', true);
 const pluginsdir = dirFunc('plugins');
-const archivedir = dirFunc('archive');
+const archivedir = processArgs.runE2eTests
+  ? dirFunc('archive-e2etests', false, ['default'])
+  : dirFunc('archive', false, ['default']);
 const appdir = dirFunc('apps');
-const filesdir = dirFunc('files');
+const filesdir = processArgs.runE2eTests ? dirFunc('files-e2etests') : dirFunc('files');
+const logsdir = dirFunc('logs', 3600 * 24 * 7);
 
 function packagedPluginsDir() {
   // console.log('CALL DIR FROM', new Error('xxx').stack);
@@ -61,8 +73,17 @@ function packagedPluginsDir() {
   if (platformInfo.isDevMode) {
     return path.resolve(__dirname, '../../../../plugins');
   }
+  if (platformInfo.isBuiltWebMode) {
+    return path.resolve(__dirname, '../../plugins');
+  }
   if (platformInfo.isDocker) {
     return '/home/dbgate-docker/plugins';
+  }
+  if (platformInfo.isAwsUbuntuLayout) {
+    return '/home/ubuntu/build/plugins';
+  }
+  if (platformInfo.isAzureUbuntuLayout) {
+    return '/home/azureuser/build/plugins';
   }
   if (platformInfo.isNpmDist) {
     // node_modules
@@ -80,6 +101,9 @@ function packagedPluginsDir() {
     //   return path.resolve(__dirname, '../../plugins');
     // }
   }
+  if (processArgs.runE2eTests) {
+    return path.resolve('packer/build/plugins');
+  }
   return null;
 }
 
@@ -94,7 +118,12 @@ function getPluginBackendPath(packageName) {
     return path.join(packagedPluginsDir(), packageName, 'dist', 'backend.js');
   }
 
-  return path.join(pluginsdir(), packageName, 'dist', 'backend.js');
+  const res = path.join(pluginsdir(), packageName, 'dist', 'backend.js');
+  if (fs.existsSync(res)) {
+    return res;
+  }
+
+  return require.resolve(packageName);
 }
 
 let archiveLinksCache = {};
@@ -127,9 +156,17 @@ function migrateDataDir() {
     if (fs.existsSync(oldDir) && !fs.existsSync(newDir)) {
       fs.renameSync(oldDir, newDir);
     }
-  } catch (e) {
-    console.log('Error migrating data dir:', e.message);
+  } catch (err) {
+    getLogger('directories').error({ err }, 'Error migrating data dir');
   }
+}
+
+function setLogsFilePath(value) {
+  logsFilePath = value;
+}
+
+function getLogsFilePath() {
+  return logsFilePath;
 }
 
 migrateDataDir();
@@ -144,9 +181,12 @@ module.exports = {
   ensureDirectory,
   pluginsdir,
   filesdir,
+  logsdir,
   packagedPluginsDir,
   packagedPluginList,
   getPluginBackendPath,
   resolveArchiveFolder,
   clearArchiveLinksCache,
+  getLogsFilePath,
+  setLogsFilePath,
 };

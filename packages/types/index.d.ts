@@ -47,3 +47,5 @@ export * from './dbtypes';
 export * from './extensions';
 export * from './alter-processor';
 export * from './appdefs';
+export * from './filter-type';
+export * from './test-engines';

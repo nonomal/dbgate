@@ -1,12 +1,21 @@
-import { currentDatabase, currentTheme, extensions, getExtensions, getVisibleToolbar, visibleToolbar } from '../stores';
+import {
+  currentDatabase,
+  currentTheme,
+  emptyConnectionGroupNames,
+  extensions,
+  getAppUpdaterActive,
+  getExtensions,
+  getVisibleToolbar,
+  visibleToolbar,
+  visibleWidgetSideBar,
+} from '../stores';
 import registerCommand from './registerCommand';
 import { get } from 'svelte/store';
 import AboutModal from '../modals/AboutModal.svelte';
 import SettingsModal from '../settings/SettingsModal.svelte';
-import ImportExportModal from '../modals/ImportExportModal.svelte';
 import SqlGeneratorModal from '../modals/SqlGeneratorModal.svelte';
 import { showModal } from '../modals/modalTools';
-import newQuery, { newDiagram, newQueryDesign } from '../query/newQuery';
+import newQuery, { newDiagram, newPerspective, newQueryDesign } from '../query/newQuery';
 import saveTabFile from '../utility/saveTabFile';
 import openNewTab from '../utility/openNewTab';
 import getElectron from '../utility/getElectron';
@@ -24,9 +33,19 @@ import { removeLocalStorage } from '../utility/storageCache';
 import { showSnackbarSuccess } from '../utility/snackbar';
 import { apiCall } from '../utility/api';
 import runCommand from './runCommand';
-import { openWebLink } from '../utility/exportFileTools';
 import { getSettings } from '../utility/metadataLoaders';
-import { isMac } from '../utility/common';
+import { isMac, switchCurrentDatabase } from '../utility/common';
+import { doLogout } from '../clientAuth';
+import { disconnectServerConnection } from '../appobj/ConnectionAppObject.svelte';
+import UploadErrorModal from '../modals/UploadErrorModal.svelte';
+import ErrorMessageModal from '../modals/ErrorMessageModal.svelte';
+import NewCollectionModal from '../modals/NewCollectionModal.svelte';
+import ConfirmModal from '../modals/ConfirmModal.svelte';
+import localforage from 'localforage';
+import { openImportExportTab } from '../utility/importExportTools';
+import newTable from '../tableeditor/newTable';
+import { isProApp } from '../utility/proTools';
+import { openWebLink } from '../utility/simpleTools';
 
 // function themeCommand(theme: ThemeDefinition) {
 //   return {
@@ -47,7 +66,7 @@ registerCommand({
   category: 'Theme',
   name: 'Change',
   toolbarName: 'Change theme',
-  onClick: () => showModal(SettingsModal, { selectedTab: 1 }),
+  onClick: () => showModal(SettingsModal, { selectedTab: 2 }),
   // getSubCommands: () => get(extensions).themes.map(themeCommand),
 });
 
@@ -76,6 +95,15 @@ registerCommand({
 });
 
 registerCommand({
+  id: 'toggle.sidebar',
+  category: 'Sidebar',
+  name: 'Show',
+  toolbarName: 'Toggle sidebar',
+  keyText: 'CtrlOrCommand+B',
+  onClick: () => visibleWidgetSideBar.update(x => !x),
+});
+
+registerCommand({
   id: 'new.connection',
   toolbar: true,
   icon: 'icon new-connection',
@@ -83,12 +111,37 @@ registerCommand({
   category: 'New',
   toolbarOrder: 1,
   name: 'Connection',
-  testEnabled: () => !getCurrentConfig()?.runAsPortal,
+  testEnabled: () => !getCurrentConfig()?.runAsPortal && !getCurrentConfig()?.storageDatabase,
   onClick: () => {
     openNewTab({
       title: 'New Connection',
       icon: 'img connection',
       tabComponent: 'ConnectionTab',
+    });
+  },
+});
+
+registerCommand({
+  id: 'new.connection.folder',
+  toolbar: true,
+  icon: 'icon add-folder',
+  toolbarName: 'Add connection folder',
+  category: 'New',
+  toolbarOrder: 1,
+  name: 'Connection folder',
+  testEnabled: () => !getCurrentConfig()?.runAsPortal,
+  onClick: () => {
+    showModal(InputTextModal, {
+      value: '',
+      label: 'New connection folder name',
+      header: 'Create connection folder',
+      onConfirm: async folder => {
+        emptyConnectionGroupNames.update(names => {
+          if (!folder) return names;
+          if (names.includes(folder)) return names;
+          return [...names, folder];
+        });
+      },
     });
   },
 });
@@ -120,14 +173,74 @@ registerCommand({
   },
 });
 
-registerCommand({
-  id: 'new.queryDesign',
-  category: 'New',
-  icon: 'img query-design',
-  name: 'Query design',
-  menuName: 'New query design',
-  onClick: () => newQueryDesign(),
-});
+if (isProApp()) {
+  registerCommand({
+    id: 'new.queryDesign',
+    category: 'New',
+    icon: 'img query-design',
+    name: 'Query design',
+    menuName: 'New query design',
+    onClick: () => newQueryDesign(),
+    testEnabled: () =>
+      getCurrentDatabase() &&
+      findEngineDriver(getCurrentDatabase()?.connection, getExtensions())?.databaseEngineTypes?.includes('sql'),
+  });
+}
+
+if (isProApp()) {
+  registerCommand({
+    id: 'new.modelTransform',
+    category: 'New',
+    icon: 'img transform',
+    name: 'Model transform',
+    menuName: 'New model transform',
+    onClick: () => {
+      openNewTab(
+        {
+          title: 'Model transform #',
+          icon: 'img transform',
+          tabComponent: 'ModelTransformTab',
+        },
+        {
+          editor: JSON.stringify(
+            [
+              {
+                transform: 'dataTypeMapperTransform',
+                arguments: ['json', 'nvarchar(max)'],
+              },
+              {
+                transform: 'sqlTextReplacementTransform',
+                arguments: [
+                  {
+                    oldval1: 'newval1',
+                    oldval2: 'newval2',
+                  },
+                ],
+              },
+              {
+                transform: 'autoIndexForeignKeysTransform',
+                arguments: [],
+              },
+            ],
+            null,
+            2
+          ),
+        }
+      );
+    },
+  });
+}
+
+if (isProApp()) {
+  registerCommand({
+    id: 'new.perspective',
+    category: 'New',
+    icon: 'img perspective',
+    name: 'Perspective',
+    menuName: 'New perspective',
+    onClick: () => newPerspective(),
+  });
+}
 
 registerCommand({
   id: 'new.diagram',
@@ -135,6 +248,9 @@ registerCommand({
   icon: 'img diagram',
   name: 'ER Diagram',
   menuName: 'New ER diagram',
+  testEnabled: () =>
+    getCurrentDatabase() &&
+    findEngineDriver(getCurrentDatabase()?.connection, getExtensions())?.databaseEngineTypes?.includes('sql'),
   onClick: () => newDiagram(),
 });
 
@@ -187,26 +303,7 @@ registerCommand({
     const $currentDatabase = get(currentDatabase);
     const connection = _.get($currentDatabase, 'connection') || {};
     const database = _.get($currentDatabase, 'name');
-
-    openNewTab(
-      {
-        title: 'Table #',
-        icon: 'img table-structure',
-        tabComponent: 'TableStructureTab',
-        props: {
-          conid: connection._id,
-          database,
-        },
-      },
-      {
-        editor: {
-          columns: [],
-        },
-      },
-      {
-        forceNewTab: true,
-      }
-    );
+    newTable(connection, database);
   },
 });
 
@@ -216,7 +313,7 @@ registerCommand({
   icon: 'icon table',
   name: 'Collection',
   toolbar: true,
-  toolbarName: 'New collection',
+  toolbarName: 'New collection/container',
   testEnabled: () => {
     const driver = findEngineDriver(get(currentDatabase)?.connection, getExtensions());
     return !!get(currentDatabase) && driver?.databaseEngineTypes?.includes('document');
@@ -225,17 +322,13 @@ registerCommand({
     const $currentDatabase = get(currentDatabase);
     const connection = _.get($currentDatabase, 'connection') || {};
     const database = _.get($currentDatabase, 'name');
+    const driver = findEngineDriver(get(currentDatabase)?.connection, getExtensions());
 
     const dbid = { conid: connection._id, database };
 
-    showModal(InputTextModal, {
-      value: '',
-      label: 'New collection name',
-      header: 'Create collection',
-      onConfirm: async newCollection => {
-        await apiCall('database-connections/run-script', { ...dbid, sql: `db.createCollection('${newCollection}')` });
-        apiCall('database-connections/sync-model', dbid);
-      },
+    showModal(NewCollectionModal, {
+      driver,
+      dbid,
     });
   },
 });
@@ -254,35 +347,22 @@ registerCommand({
   },
 });
 
-registerCommand({
-  id: 'new.modelCompare',
-  category: 'New',
-  icon: 'icon compare',
-  name: 'Compare DB',
-  toolbar: true,
-  onClick: () => {
-    openNewTab({
-      title: 'Compare',
-      icon: 'img compare',
-      tabComponent: 'CompareModelTab',
-    });
-  },
-});
-
-registerCommand({
-  id: 'new.freetable',
-  category: 'New',
-  icon: 'img markdown',
-  name: 'Data sheet',
-  menuName: 'New data sheet',
-  onClick: () => {
-    openNewTab({
-      title: 'Data #',
-      icon: 'img free-table',
-      tabComponent: 'FreeTableTab',
-    });
-  },
-});
+if (isProApp()) {
+  registerCommand({
+    id: 'new.modelCompare',
+    category: 'New',
+    icon: 'icon compare',
+    name: 'Compare DB',
+    toolbar: true,
+    onClick: () => {
+      openNewTab({
+        title: 'Compare',
+        icon: 'img compare',
+        tabComponent: 'CompareModelTab',
+      });
+    },
+  });
+}
 
 registerCommand({
   id: 'new.jsonl',
@@ -318,7 +398,7 @@ registerCommand({
       onConfirm: async file => {
         const resp = await apiCall('connections/new-sqlite-database', { file });
         const connection = resp;
-        currentDatabase.set({ connection, name: `${file}.sqlite` });
+        switchCurrentDatabase({ connection, name: `${file}.sqlite` });
       },
     });
   },
@@ -392,16 +472,62 @@ registerCommand({
 });
 
 registerCommand({
+  id: 'folder.showLogs',
+  category: 'Folder',
+  name: 'Open logs',
+  testEnabled: () => getElectron() != null,
+  onClick: () => electron.showItemInFolder(getCurrentConfig().logsFilePath),
+});
+
+registerCommand({
+  id: 'folder.showData',
+  category: 'Folder',
+  name: 'Open data folder',
+  testEnabled: () => getElectron() != null,
+  onClick: () => electron.showItemInFolder(getCurrentConfig().connectionsFilePath),
+});
+
+registerCommand({
+  id: 'app.resetSettings',
+  category: 'File',
+  name: 'Reset layout data & settings',
+  testEnabled: () => true,
+  onClick: () => {
+    showModal(ConfirmModal, {
+      message: `Really reset layout data? All opened tabs, settings and layout data will be lost. Connections and saved files will be preserved. After this, restart DbGate for applying changes.`,
+      onConfirm: async () => {
+        await apiCall('config/delete-settings');
+        localStorage.clear();
+        await localforage.clear();
+        if (getElectron()) {
+          getElectron().send('reset-settings');
+        } else {
+          window.location.reload();
+        }
+      },
+    });
+  },
+});
+
+registerCommand({
   id: 'file.import',
   category: 'File',
   name: 'Import data',
   toolbar: true,
   icon: 'icon import',
   onClick: () =>
-    showModal(ImportExportModal, {
-      importToCurrentTarget: true,
-      initialValues: { sourceStorageType: getDefaultFileFormat(get(extensions)).storageType },
-    }),
+    openImportExportTab(
+      {
+        sourceStorageType: getDefaultFileFormat(get(extensions)).storageType,
+      },
+      {
+        importToCurrentTarget: true,
+      }
+    ),
+  // showModal(ImportExportModal, {
+  //   importToCurrentTarget: true,
+  //   initialValues: { sourceStorageType: getDefaultFileFormat(get(extensions)).storageType },
+  // }),
 });
 
 registerCommand({
@@ -444,7 +570,7 @@ registerCommand({
   name: 'SQL Generator',
   toolbar: true,
   icon: 'icon sql-generator',
-  testEnabled: () => getCurrentDatabase() != null,
+  testEnabled: () => getCurrentDatabase() != null && hasPermission(`dbops/sql-generator`),
   onClick: () =>
     showModal(SqlGeneratorModal, {
       conid: getCurrentDatabase()?.connection?._id,
@@ -489,10 +615,25 @@ registerCommand({
   id: 'app.logout',
   category: 'App',
   name: 'Logout',
-  testEnabled: () => getCurrentConfig()?.login != null,
-  onClick: () => {
-    window.location.href = 'config/logout';
-  },
+  testEnabled: () => getCurrentConfig()?.isUserLoggedIn,
+  onClick: doLogout,
+});
+
+registerCommand({
+  id: 'app.disconnect',
+  category: 'App',
+  name: 'Disconnect',
+  testEnabled: () => getCurrentConfig()?.singleConnection != null && !getCurrentConfig()?.isUserLoggedIn,
+  onClick: () => disconnectServerConnection(getCurrentConfig()?.singleConnection?._id),
+});
+
+registerCommand({
+  id: 'file.checkForUpdates',
+  category: 'App',
+  name: 'Check for updates',
+  // testEnabled: () => true,
+  testEnabled: () => getAppUpdaterActive(),
+  onClick: () => getElectron().send('check-for-updates'),
 });
 
 export function registerFileCommands({
@@ -508,6 +649,7 @@ export function registerFileCommands({
   findReplace = false,
   undoRedo = false,
   executeAdditionalCondition = null,
+  copyPaste = false,
 }) {
   if (save) {
     registerCommand({
@@ -578,6 +720,25 @@ export function registerFileCommands({
     });
   }
 
+  if (copyPaste) {
+    registerCommand({
+      id: idPrefix + '.copy',
+      category,
+      name: 'Copy',
+      disableHandleKeyText: 'CtrlOrCommand+C',
+      testEnabled: () => getCurrentEditor() != null,
+      onClick: () => getCurrentEditor().copy(),
+    });
+    registerCommand({
+      id: idPrefix + '.paste',
+      category,
+      name: 'Paste',
+      disableHandleKeyText: 'CtrlOrCommand+V',
+      testEnabled: () => getCurrentEditor() != null,
+      onClick: () => getCurrentEditor().paste(),
+    });
+  }
+
   if (findReplace) {
     registerCommand({
       id: idPrefix + '.find',
@@ -590,7 +751,7 @@ export function registerFileCommands({
     registerCommand({
       id: idPrefix + '.replace',
       category,
-      keyText: 'CtrlOrCommand+H',
+      keyText: isMac() ? 'Alt+Command+F' : 'CtrlOrCommand+H',
       name: 'Replace',
       testEnabled: () => getCurrentEditor() != null,
       onClick: () => getCurrentEditor().replace(),
@@ -624,6 +785,14 @@ registerCommand({
   name: 'Minimize',
   testEnabled: () => getElectron() != null,
   onClick: () => getElectron().send('window-action', 'minimize'),
+});
+
+registerCommand({
+  id: 'app.maximize',
+  category: 'Application',
+  name: 'Maximize',
+  testEnabled: () => getElectron() != null,
+  onClick: () => getElectron().send('window-action', 'maximize'),
 });
 
 registerCommand({
@@ -758,6 +927,31 @@ registerCommand({
   systemCommand: true,
   testEnabled: () => getElectron() != null,
   onClick: () => getElectron().send('window-action', 'paste'),
+});
+
+registerCommand({
+  id: 'edit.selectAll',
+  category: 'Edit',
+  name: 'Select All',
+  keyText: 'CtrlOrCommand+A',
+  systemCommand: true,
+  testEnabled: () => getElectron() != null,
+  onClick: () => getElectron().send('window-action', 'selectAll'),
+});
+
+registerCommand({
+  id: 'new.gist',
+  category: 'New',
+  name: 'Upload error to gist',
+  onClick: () => showModal(UploadErrorModal),
+});
+
+registerCommand({
+  id: 'app.unsetCurrentDatabase',
+  category: 'Application',
+  name: 'Unset current database',
+  testEnabled: () => getCurrentDatabase() != null,
+  onClick: () => currentDatabase.set(null),
 });
 
 const electron = getElectron();

@@ -23,14 +23,14 @@
         <div class="icon">
           <FontIcon icon="img error" />
         </div>
-        <div>
+        <div data-testid="ErrorMessageModal_message">
           {message}
         </div>
       </div>
     {/if}
 
     <div slot="footer">
-      <FormSubmit value="Close" on:click={closeCurrentModal} />
+      <FormSubmit value="Close" on:click={closeCurrentModal} data-testid="ErrorMessageModal_closeButton" />
     </div>
   </ModalBase>
 </FormProvider>

@@ -1,4 +1,4 @@
-const { driverBase } = global.DBGATE_TOOLS;
+const { driverBase } = global.DBGATE_PACKAGES['dbgate-tools'];
 const MsSqlDumper = require('./MsSqlDumper');
 const { mssqlSplitterOptions } = require('dbgate-query-splitter/lib/options');
 
@@ -8,8 +8,11 @@ const spatialTypes = ['GEOGRAPHY'];
 const dialect = {
   limitSelect: true,
   rangeSelect: true,
+  topRecords: true,
   offsetFetchRangeSyntax: true,
   rowNumberOverPaging: true,
+  defaultSchemaName: 'dbo',
+  multipleSchema: true,
   stringEscapeChar: "'",
   fallbackDataType: 'nvarchar(max)',
   explicitDropConstraint: false,
@@ -35,8 +38,11 @@ const dialect = {
   dropUnique: true,
   createCheck: true,
   dropCheck: true,
+  renameSqlObject: true,
+  filteredIndexes: true,
 
   dropReferencesWhenDropTable: true,
+  namedDefaultConstraint: true,
 
   columnProperties: {
     isSparse: true,
@@ -58,7 +64,7 @@ const dialect = {
     'date',
     'datetime2',
     'datetime',
-    'datetimeofffset',
+    'datetimeoffset',
     'smalldatetime',
     'time',
     'char(20)',
@@ -113,6 +119,7 @@ const driver = {
   dumperClass: MsSqlDumper,
   dialect,
   readOnlySessions: false,
+  requiresDefaultSortCriteria: true,
   dialectByVersion(version) {
     if (version && version.productVersionNumber < 11) {
       return {
@@ -124,18 +131,30 @@ const driver = {
     return dialect;
   },
   showConnectionField: (field, values) =>
-    ['authType', 'server', 'port', 'user', 'password', 'defaultDatabase', 'singleDatabase', 'isReadOnly'].includes(
-      field
-    ) ||
+    [
+      'authType',
+      'server',
+      'port',
+      'user',
+      'password',
+      'defaultDatabase',
+      'singleDatabase',
+      'isReadOnly',
+      'useSeparateSchemas',
+    ].includes(field) ||
     (field == 'trustServerCertificate' && values.authType != 'sql' && values.authType != 'sspi') ||
-    (field == 'windowsDomain' && values.authType != 'sql' && values.authType != 'sspi'),
+    (field == 'windowsDomain' && values.authType != 'sql' && values.authType != 'sspi' && values.authType != 'msentra'),
   // (field == 'useDatabaseUrl' && values.authType != 'sql' && values.authType != 'sspi')
-  getQuerySplitterOptions: () => mssqlSplitterOptions,
+  getQuerySplitterOptions: usage =>
+    usage == 'editor'
+      ? { ...mssqlSplitterOptions, adaptiveGoSplit: true, ignoreComments: true, preventSingleLineSplit: true }
+      : mssqlSplitterOptions,
 
   engine: 'mssql@dbgate-plugin-mssql',
   title: 'Microsoft SQL Server',
   defaultPort: 1433,
   defaultAuthTypeName: 'tedious',
+  supportsTransactions: true,
   // databaseUrlPlaceholder: 'e.g. server=localhost&authentication.type=default&authentication.type.user=myuser&authentication.type.password=pwd&options.database=mydb',
 
   getNewObjectTemplates() {
@@ -147,7 +166,18 @@ const driver = {
         label: 'New table valued function',
         sql: 'CREATE FUNCTION myfunc (@arg1 INT) RETURNS TABLE \nAS\nRETURN SELECT * FROM table1',
       },
+      {
+        label: 'New trigger',
+        sql: 'CREATE TRIGGER trigger_name\nON table_name AFTER INSERT AS\nBEGIN\nSELECT * FROM table_name\nEND',
+      },
     ];
+  },
+
+  beforeConnectionSave: connection => {
+    return {
+      ...connection,
+      useRedirectDbLogin: connection.authType == 'msentra' ? 1 : 0,
+    };
   },
 };
 

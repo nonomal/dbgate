@@ -1,4 +1,4 @@
-<script context="module">
+<script context="module" lang="ts">
   export async function saveScriptToDatabase({ conid, database }, sql, syncModel = true) {
     const resp = await apiCall('database-connections/run-script', {
       conid,
@@ -14,15 +14,36 @@
       if (syncModel) apiCall('database-connections/sync-model', { conid, database });
     }
   }
+
+  export async function runOperationOnDatabase({ conid, database }, operation, syncModel: string | boolean = true) {
+    const resp = await apiCall('database-connections/run-operation', {
+      conid,
+      database,
+      operation,
+    });
+
+    const { errorMessage } = resp || {};
+    if (errorMessage) {
+      showModal(ErrorMessageModal, { title: 'Error when executing operation', message: errorMessage });
+    } else {
+      showSnackbarSuccess('Saved to database');
+      if (_.isString(syncModel)) {
+        apiCall('database-connections/dispatch-database-changed-event', { event: syncModel, conid, database });
+      } else if (syncModel) {
+        apiCall('database-connections/sync-model', { conid, database });
+      }
+    }
+  }
 </script>
 
 <script>
-  import _, { startsWith } from 'lodash';
+  import _ from 'lodash';
   import { writable } from 'svelte/store';
   import FormStyledButton from '../buttons/FormStyledButton.svelte';
   import FormCheckboxField from '../forms/FormCheckboxField.svelte';
   import FormProviderCore from '../forms/FormProviderCore.svelte';
   import FormSubmit from '../forms/FormSubmit.svelte';
+  import TemplatedCheckboxField from '../forms/TemplatedCheckboxField.svelte';
   import FontIcon from '../icons/FontIcon.svelte';
   import newQuery from '../query/newQuery';
   import SqlEditor from '../query/SqlEditor.svelte';
@@ -38,11 +59,23 @@
   export let engine;
   export let recreates;
   export let deleteCascadesScripts;
+  export let skipConfirmSettingKey = null;
+
+  let dontAskAgain;
 
   $: isRecreated = _.sum(_.values(recreates || {})) > 0;
   const values = writable({});
 
   // $: console.log('recreates', recreates);
+
+  $: currentScript = $values.deleteReferencesCascade
+    ? [
+        ...deleteCascadesScripts
+          .filter(({ script, title }) => $values[`deleteReferencesFor_${title}`] !== false)
+          .map(({ script, title }) => script),
+        sql,
+      ].join('\n')
+    : sql;
 </script>
 
 <FormProviderCore {values}>
@@ -50,18 +83,7 @@
     <div slot="header">Save changes</div>
 
     <div class="editor">
-      <SqlEditor
-        {engine}
-        value={$values.deleteReferencesCascade
-          ? [
-              ...deleteCascadesScripts
-                .filter(({ script, title }) => $values[`deleteReferencesFor_${title}`] !== false)
-                .map(({ script, title }) => script),
-              sql,
-            ].join('\n')
-          : sql}
-        readOnly
-      />
+      <SqlEditor {engine} value={currentScript} readOnly />
     </div>
 
     {#if !_.isEmpty(deleteCascadesScripts)}
@@ -70,6 +92,7 @@
           templateProps={{ noMargin: true }}
           label="Delete references CASCADE"
           name="deleteReferencesCascade"
+          data-testid="ConfirmSqlModal_deleteReferencesCascade"
         />
       </div>
     {/if}
@@ -122,35 +145,47 @@
       </div>
     {/if}
 
+    {#if skipConfirmSettingKey}
+      <div class="mt-2">
+        <TemplatedCheckboxField
+          label="Don't ask again"
+          templateProps={{ noMargin: true }}
+          checked={dontAskAgain}
+          on:change={e => {
+            dontAskAgain = e.detail;
+            apiCall('config/update-settings', { [skipConfirmSettingKey]: e.detail });
+          }}
+        />
+      </div>
+    {/if}
+
     <div slot="footer">
       <FormSubmit
         value="OK"
         disabled={isRecreated && !$values.allowRecreate}
         on:click={e => {
           closeCurrentModal();
-          onConfirm(
-            e.detail.deleteReferencesCascade
-              ? [
-                  ...deleteCascadesScripts
-                    .filter(({ script, title }) => e.detail[`deleteReferencesFor_${title}`] !== false)
-                    .map(({ script, title }) => script),
-                  sql,
-                ].join('\n')
-              : null
-          );
+          onConfirm(currentScript);
         }}
+        data-testid="ConfirmSqlModal_okButton"
       />
-      <FormStyledButton type="button" value="Close" on:click={closeCurrentModal} />
+      <FormStyledButton
+        type="button"
+        value="Close"
+        on:click={closeCurrentModal}
+        data-testid="ConfirmSqlModal_closeButton"
+      />
       <FormStyledButton
         type="button"
         value="Open script"
         on:click={() => {
           newQuery({
-            initialData: sql,
+            initialData: currentScript,
           });
 
           closeCurrentModal();
         }}
+        data-testid="ConfirmSqlModal_openScriptButton"
       />
     </div>
   </ModalBase>

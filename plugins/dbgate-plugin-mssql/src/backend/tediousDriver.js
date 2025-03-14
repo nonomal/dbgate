@@ -1,7 +1,9 @@
 const _ = require('lodash');
 const stream = require('stream');
 const tedious = require('tedious');
+const { ManagedIdentityCredential } = require('@azure/identity');
 const makeUniqueColumnNames = require('./makeUniqueColumnNames');
+const { extractDbNameFromComposite } = global.DBGATE_PACKAGES['dbgate-tools'];
 
 function extractTediousColumns(columns, addDriverNativeColumn = false) {
   const res = columns.map(col => {
@@ -22,10 +24,50 @@ function extractTediousColumns(columns, addDriverNativeColumn = false) {
   return res;
 }
 
-async function tediousConnect({ server, port, user, password, database, ssl, trustServerCertificate, windowsDomnain }) {
+async function getDefaultAzureSqlToken() {
+  const credential = new ManagedIdentityCredential();
+  const tokenResponse = await credential.getToken('https://database.windows.net/.default');
+  return tokenResponse.token;
+}
+
+async function getAuthentication({ authType, accessToken, user, password, windowsDomain }) {
+  switch (authType) {
+    case 'azureManagedIdentity':
+      const token = await getDefaultAzureSqlToken();
+      return {
+        type: 'azure-active-directory-access-token',
+        options: {
+          token,
+        },
+      };
+
+    case 'msentra':
+      return {
+        type: 'azure-active-directory-access-token',
+        options: {
+          token: accessToken,
+        },
+      };
+    default:
+      return {
+        type: windowsDomain ? 'ntlm' : 'default',
+        options: {
+          userName: user,
+          password: password,
+          ...(windowsDomain ? { domain: windowsDomain } : {}),
+        },
+      };
+  }
+}
+
+async function tediousConnect(storedConnection) {
+  const { server, port, database, ssl, trustServerCertificate, authType } = storedConnection;
+
+  const authentication = await getAuthentication(storedConnection);
+
   return new Promise((resolve, reject) => {
     const connectionOptions = {
-      encrypt: !!ssl,
+      encrypt: !!ssl || authType == 'msentra' || authType == 'azureManagedIdentity',
       cryptoCredentialsDetails: ssl ? _.pick(ssl, ['ca', 'cert', 'key']) : undefined,
       trustServerCertificate: ssl ? (!ssl.ca && !ssl.cert && !ssl.key ? true : ssl.rejectUnauthorized) : undefined,
       enableArithAbort: true,
@@ -33,38 +75,29 @@ async function tediousConnect({ server, port, user, password, database, ssl, tru
       requestTimeout: 1000 * 3600,
       port: port ? parseInt(port) : undefined,
       trustServerCertificate: !!trustServerCertificate,
+      appName: 'DbGate',
     };
 
     if (database) {
-      connectionOptions.database = database;
+      connectionOptions.database = extractDbNameFromComposite(database);
     }
 
     const connection = new tedious.Connection({
       server,
-
-      authentication: {
-        type: windowsDomnain ? 'ntlm' : 'default',
-        options: {
-          userName: user,
-          password: password,
-          ...(windowsDomnain ? { domain: windowsDomnain } : {}),
-        },
-      },
-
+      authentication,
       options: connectionOptions,
     });
     connection.on('connect', function (err) {
       if (err) {
         reject(err);
       }
-      connection._connectionType = 'tedious';
       resolve(connection);
     });
     connection.connect();
   });
 }
 
-async function tediousQueryCore(pool, sql, options) {
+async function tediousQueryCore(dbhan, sql, options) {
   if (sql == null) {
     return Promise.resolve({
       rows: [],
@@ -92,12 +125,12 @@ async function tediousQueryCore(pool, sql, options) {
         )
       );
     });
-    if (discardResult) pool.execSqlBatch(request);
-    else pool.execSql(request);
+    if (discardResult) dbhan.client.execSqlBatch(request);
+    else dbhan.client.execSql(request);
   });
 }
 
-async function tediousReadQuery(pool, sql, structure) {
+async function tediousReadQuery(dbhan, sql, structure) {
   const pass = new stream.PassThrough({
     objectMode: true,
     highWaterMark: 100,
@@ -122,19 +155,19 @@ async function tediousReadQuery(pool, sql, structure) {
     );
     pass.write(row);
   });
-  pool.execSql(request);
+  dbhan.client.execSql(request);
 
   return pass;
 }
 
-async function tediousStream(pool, sql, options) {
+async function tediousStream(dbhan, sql, options) {
   let currentColumns = [];
 
   const handleInfo = info => {
     const { message, lineNumber, procName } = info;
     options.info({
       message,
-      line: lineNumber,
+      line: lineNumber != null && lineNumber > 0 ? lineNumber - 1 : lineNumber,
       procedure: procName,
       time: new Date(),
       severity: 'info',
@@ -144,21 +177,21 @@ async function tediousStream(pool, sql, options) {
     const { message, lineNumber, procName } = error;
     options.info({
       message,
-      line: lineNumber,
+      line: lineNumber != null && lineNumber > 0 ? lineNumber - 1 : lineNumber,
       procedure: procName,
       time: new Date(),
       severity: 'error',
     });
   };
 
-  pool.on('infoMessage', handleInfo);
-  pool.on('errorMessage', handleError);
+  dbhan.client.on('infoMessage', handleInfo);
+  dbhan.client.on('errorMessage', handleError);
   const request = new tedious.Request(sql, (err, rowCount) => {
     // if (err) reject(err);
     // else resolve(result);
     options.done();
-    pool.off('infoMessage', handleInfo);
-    pool.off('errorMessage', handleError);
+    dbhan.client.off('infoMessage', handleInfo);
+    dbhan.client.off('errorMessage', handleError);
 
     options.info({
       message: `${rowCount} rows affected`,
@@ -177,7 +210,7 @@ async function tediousStream(pool, sql, options) {
     );
     options.row(row);
   });
-  pool.execSqlBatch(request);
+  dbhan.client.execSqlBatch(request);
 }
 
 module.exports = {

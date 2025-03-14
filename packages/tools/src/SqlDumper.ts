@@ -1,5 +1,4 @@
-import _ from 'lodash';
-import {
+import type {
   ColumnInfo,
   ConstraintInfo,
   EngineDriver,
@@ -18,12 +17,15 @@ import {
   CheckInfo,
   AlterProcessor,
   SqlObjectInfo,
+  CallableObjectInfo,
+  SchedulerEventInfo,
 } from 'dbgate-types';
 import _isString from 'lodash/isString';
 import _isNumber from 'lodash/isNumber';
 import _isDate from 'lodash/isDate';
 import _isArray from 'lodash/isArray';
 import _isPlainObject from 'lodash/isPlainObject';
+import _keys from 'lodash/keys';
 import uuidv1 from 'uuid/v1';
 
 export class SqlDumper implements AlterProcessor {
@@ -31,6 +33,12 @@ export class SqlDumper implements AlterProcessor {
   driver: EngineDriver;
   dialect: SqlDialect;
   indentLevel = 0;
+
+  static keywordsCase = 'upperCase';
+  static convertKeywordCase(keyword: any): string {
+    if (this.keywordsCase == 'lowerCase') return keyword?.toString()?.toLowerCase();
+    return keyword?.toString()?.toUpperCase();
+  }
 
   constructor(driver: EngineDriver) {
     this.driver = driver;
@@ -60,10 +68,10 @@ export class SqlDumper implements AlterProcessor {
     this.putRaw("'");
   }
   putByteArrayValue(value) {
-    this.putRaw('NULL');
+    this.put('^null');
   }
-  putValue(value) {
-    if (value === null) this.putRaw('NULL');
+  putValue(value, dataType = null) {
+    if (value === null) this.put('^null');
     else if (value === true) this.putRaw('1');
     else if (value === false) this.putRaw('0');
     else if (_isString(value)) this.putStringValue(value);
@@ -71,7 +79,7 @@ export class SqlDumper implements AlterProcessor {
     else if (_isDate(value)) this.putStringValue(new Date(value).toISOString());
     else if (value?.type == 'Buffer' && _isArray(value?.data)) this.putByteArrayValue(value?.data);
     else if (_isPlainObject(value) || _isArray(value)) this.putStringValue(JSON.stringify(value));
-    else this.putRaw('NULL');
+    else this.put('^null');
   }
   putCmd(format, ...args) {
     this.put(format, ...args);
@@ -92,7 +100,7 @@ export class SqlDumper implements AlterProcessor {
       case 'k':
         {
           if (value) {
-            this.putRaw(value.toUpperCase());
+            this.putRaw(SqlDumper.convertKeywordCase(value));
           }
         }
         break;
@@ -108,6 +116,9 @@ export class SqlDumper implements AlterProcessor {
         break;
       case 'v':
         this.putValue(value);
+        break;
+      case 'V':
+        this.putValue(value.value, value.dataType);
         break;
       case 'c':
         value(this);
@@ -127,10 +138,29 @@ export class SqlDumper implements AlterProcessor {
       i++;
       switch (c) {
         case '^':
+          if (format[i] == '^') {
+            this.putRaw('^');
+            i++;
+            break;
+          }
+
           while (i < length && format[i].match(/[a-z0-9_]/i)) {
-            this.putRaw(format[i].toUpperCase());
+            this.putRaw(SqlDumper.convertKeywordCase(format[i]));
             i++;
           }
+          break;
+        case '~':
+          if (format[i] == '~') {
+            this.putRaw('~');
+            i++;
+            break;
+          }
+          let ident = '';
+          while (i < length && format[i].match(/[a-z0-9_]/i)) {
+            ident += format[i];
+            i++;
+          }
+          this.putRaw(this.dialect.quoteIdentifier(ident));
           break;
         case '%':
           c = format[i];
@@ -181,7 +211,38 @@ export class SqlDumper implements AlterProcessor {
     this.put(' ^auto_increment');
   }
 
+  createDatabase(name: string) {
+    this.putCmd('^create ^database %i', name);
+  }
+
+  dropDatabase(name: string) {
+    this.putCmd('^drop ^database %i', name);
+  }
+
+  createSchema(name: string) {
+    this.putCmd('^create ^schema %i', name);
+  }
+
+  dropSchema(name: string) {
+    this.putCmd('^drop ^schema %i', name);
+  }
+
   specialColumnOptions(column) {}
+
+  selectScopeIdentity(table: TableInfo) {}
+
+  columnType(dataType: string) {
+    const type = dataType || this.dialect.fallbackDataType;
+    const typeWithValues = type.match(/([^(]+)(\(.+[^)]\))/);
+
+    if (typeWithValues?.length) {
+      typeWithValues.shift();
+      this.putRaw(SqlDumper.convertKeywordCase(typeWithValues.shift()));
+      this.putRaw(typeWithValues);
+    } else {
+      this.putRaw(SqlDumper.convertKeywordCase(type));
+    }
+  }
 
   columnDefinition(column: ColumnInfo, { includeDefault = true, includeNullable = true, includeCollate = true } = {}) {
     if (column.computedExpression) {
@@ -189,23 +250,35 @@ export class SqlDumper implements AlterProcessor {
       if (column.isPersisted) this.put(' ^persisted');
       return;
     }
-    this.put('%k', column.dataType || this.dialect.fallbackDataType);
-    if (column.autoIncrement) {
+
+    this.columnType(column.dataType);
+
+    if (column.autoIncrement && !this.dialect?.disableAutoIncrement) {
       this.autoIncrement();
     }
 
     this.putRaw(' ');
     this.specialColumnOptions(column);
-    if (includeNullable) {
-      this.put(column.notNull ? '^not ^null' : '^null');
-    }
-    if (includeDefault && column.defaultValue?.trim()) {
-      this.columnDefault(column);
+
+    if (this.dialect?.defaultValueBeforeNullability) {
+      if (includeDefault && column.defaultValue?.toString()?.trim()) {
+        this.columnDefault(column);
+      }
+      if (includeNullable && !this.dialect?.specificNullabilityImplementation) {
+        this.put(column.notNull ? '^not ^null' : '^null');
+      }
+    } else {
+      if (includeNullable && !this.dialect?.specificNullabilityImplementation) {
+        this.put(column.notNull ? '^not ^null' : '^null');
+      }
+      if (includeDefault && column.defaultValue?.toString()?.trim()) {
+        this.columnDefault(column);
+      }
     }
   }
 
   columnDefault(column: ColumnInfo) {
-    if (column.defaultConstraint != null) {
+    if (column.defaultConstraint != null && this.dialect?.namedDefaultConstraint) {
       this.put(' ^constraint %i ^default %s ', column.defaultConstraint, column.defaultValue);
     } else {
       this.put(' ^default %s ', column.defaultValue);
@@ -228,16 +301,7 @@ export class SqlDumper implements AlterProcessor {
       this.put('%i ', col.columnName);
       this.columnDefinition(col);
     });
-    if (table.primaryKey) {
-      this.put(',&n');
-      if (table.primaryKey.constraintName) {
-        this.put('^constraint %i', table.primaryKey.constraintName);
-      }
-      this.put(
-        ' ^primary ^key (%,i)',
-        table.primaryKey.columns.map(x => x.columnName)
-      );
-    }
+    this.createTablePrimaryKeyCore(table);
 
     (table.foreignKeys || []).forEach(fk => {
       this.put(',&n');
@@ -253,14 +317,42 @@ export class SqlDumper implements AlterProcessor {
     });
 
     this.put('&<&n)');
+
+    this.tableOptions(table);
+
     this.endCommand();
     (table.indexes || []).forEach(ix => {
       this.createIndex(ix);
     });
   }
 
+  tableOptions(table: TableInfo) {
+    const options = this.driver?.dialect?.getTableFormOptions?.('sqlCreateTable') || [];
+    for (const option of options) {
+      if (table[option.name]) {
+        this.put('&n');
+        this.put(option.sqlFormatString, table[option.name]);
+      }
+    }
+  }
+
+  createTablePrimaryKeyCore(table: TableInfo) {
+    if (table.primaryKey) {
+      this.put(',&n');
+      if (table.primaryKey.constraintName && !this.dialect.anonymousPrimaryKey) {
+        this.put('^constraint %i', table.primaryKey.constraintName);
+      }
+      this.put(
+        ' ^primary ^key (%,i)',
+        table.primaryKey.columns.map(x => x.columnName)
+      );
+    }
+  }
+
   createForeignKeyFore(fk: ForeignKeyInfo) {
-    if (fk.constraintName != null) this.put('^constraint %i ', fk.constraintName);
+    if (fk.constraintName != null && !this.dialect.anonymousForeignKey) {
+      this.put('^constraint %i ', fk.constraintName);
+    }
     this.put(
       '^foreign ^key (%,i) ^references %f (%,i)',
       fk.columns.map(x => x.columnName),
@@ -277,6 +369,7 @@ export class SqlDumper implements AlterProcessor {
 
   allowIdentityInsert(table: NamedObjectInfo, allow: boolean) {}
   enableConstraints(table: NamedObjectInfo, enabled: boolean) {}
+  enableAllForeignKeys(enabled: boolean) {}
 
   comment(value: string) {
     if (!value) return;
@@ -354,6 +447,14 @@ export class SqlDumper implements AlterProcessor {
   }
   changeTriggerSchema(obj: TriggerInfo, newSchema: string) {}
   renameTrigger(obj: TriggerInfo, newSchema: string) {}
+
+  createSchedulerEvent(obj: SchedulerEventInfo) {
+    this.putRaw(obj.createSql);
+    this.endCommand();
+  }
+  dropSchedulerEvent(obj: SchedulerEventInfo, { testIfExists = false }) {
+    this.putCmd('^drop ^event  %f', obj);
+  }
 
   dropConstraintCore(cnt: ConstraintInfo) {
     this.putCmd('^alter ^table %f ^drop ^constraint %i', cnt, cnt.constraintName);
@@ -440,6 +541,9 @@ export class SqlDumper implements AlterProcessor {
       this.put('%i %k', col.columnName, col.isDescending == true ? 'DESC' : 'ASC');
     });
     this.put('&<&n)');
+    if (ix.filterDefinition && this.dialect.filteredIndexes) {
+      this.put('&n^where %s', ix.filterDefinition);
+    }
     this.endCommand();
   }
 
@@ -477,7 +581,9 @@ export class SqlDumper implements AlterProcessor {
   renameConstraint(constraint: ConstraintInfo, newName: string) {}
 
   createColumn(column: ColumnInfo, constraints: ConstraintInfo[]) {
-    this.put('^alter ^table %f ^add %i ', column, column.columnName);
+    this.put('^alter ^table %f ^add ', column);
+    if (this.dialect.createColumnWithColumnKeyword) this.put('^column ');
+    this.put(' %i ', column.columnName);
     this.columnDefinition(column);
     this.inlineConstraints(constraints);
     this.endCommand();
@@ -511,12 +617,18 @@ export class SqlDumper implements AlterProcessor {
 
   renameTable(obj: TableInfo, newname: string) {}
 
+  renameSqlObject(obj: SqlObjectInfo, newname: string) {}
+
   beginTransaction() {
     this.putCmd('^begin ^transaction');
   }
 
   commitTransaction() {
     this.putCmd('^commit');
+  }
+
+  rollbackTransaction() {
+    this.putCmd('^rollback');
   }
 
   alterProlog() {}
@@ -527,7 +639,7 @@ export class SqlDumper implements AlterProcessor {
   }
 
   truncateTable(name: NamedObjectInfo) {
-    this.putCmd('^delete ^from %f', name);
+    this.putCmd('^truncate ^table %f', name);
   }
 
   dropConstraints(table: TableInfo, dropReferences = false) {
@@ -549,10 +661,8 @@ export class SqlDumper implements AlterProcessor {
     if (!oldTable.pairingId || !newTable.pairingId || oldTable.pairingId != newTable.pairingId) {
       throw new Error('Recreate is not possible: oldTable.paringId != newTable.paringId');
     }
-    const tmpTable = `temp_${uuidv1()}`;
 
-    // console.log('oldTable', oldTable);
-    // console.log('newTable', newTable);
+    const tmpTable = `temp_${uuidv1()}`;
 
     const columnPairs = oldTable.columns
       .map(oldcol => ({
@@ -561,37 +671,54 @@ export class SqlDumper implements AlterProcessor {
       }))
       .filter(x => x.newcol);
 
-    this.dropConstraints(oldTable, true);
-    this.renameTable(oldTable, tmpTable);
+    if (this.driver.supportsTransactions) {
+      this.dropConstraints(oldTable, true);
+      this.renameTable(oldTable, tmpTable);
 
-    this.createTable(newTable);
+      this.createTable(newTable);
 
-    const autoinc = newTable.columns.find(x => x.autoIncrement);
-    if (autoinc) {
-      this.allowIdentityInsert(newTable, true);
+      const autoinc = newTable.columns.find(x => x.autoIncrement);
+      if (autoinc) {
+        this.allowIdentityInsert(newTable, true);
+      }
+
+      this.putCmd(
+        '^insert ^into %f (%,i) select %,i ^from %f',
+        newTable,
+        columnPairs.map(x => x.newcol.columnName),
+        columnPairs.map(x => x.oldcol.columnName),
+        { ...oldTable, pureName: tmpTable }
+      );
+
+      if (autoinc) {
+        this.allowIdentityInsert(newTable, false);
+      }
+
+      if (this.dialect.dropForeignKey) {
+        newTable.dependencies.forEach(cnt => this.createConstraint(cnt));
+      }
+
+      this.dropTable({ ...oldTable, pureName: tmpTable });
+    } else {
+      // we have to preserve old table as long as possible
+      this.createTable({ ...newTable, pureName: tmpTable });
+
+      this.putCmd(
+        '^insert ^into %f (%,i) select %,s ^from %f',
+        { ...newTable, pureName: tmpTable },
+        columnPairs.map(x => x.newcol.columnName),
+        columnPairs.map(x => x.oldcol.columnName),
+        oldTable
+      );
+
+      this.dropTable(oldTable);
+      this.renameTable({ ...newTable, pureName: tmpTable }, newTable.pureName);
     }
-
-    this.putCmd(
-      '^insert ^into %f (%,i) select %,s ^from %f',
-      newTable,
-      columnPairs.map(x => x.newcol.columnName),
-      columnPairs.map(x => x.oldcol.columnName),
-      { ...oldTable, pureName: tmpTable }
-    );
-
-    if (autoinc) {
-      this.allowIdentityInsert(newTable, false);
-    }
-
-    if (this.dialect.dropForeignKey) {
-      newTable.dependencies.forEach(cnt => this.createConstraint(cnt));
-    }
-
-    this.dropTable({ ...oldTable, pureName: tmpTable });
   }
 
   createSqlObject(obj: SqlObjectInfo) {
-    this.putCmd(obj.createSql);
+    this.putRaw(obj.createSql);
+    this.endCommand();
   }
 
   getSqlObjectSqlName(ojectTypeField: string) {
@@ -606,6 +733,8 @@ export class SqlDumper implements AlterProcessor {
         return 'TRIGGER';
       case 'matviews':
         return 'MATERIALIZED VIEW';
+      case 'schedulerEvents':
+        return 'EVENT';
     }
   }
 
@@ -613,11 +742,41 @@ export class SqlDumper implements AlterProcessor {
     this.putCmd('^drop %s %f', this.getSqlObjectSqlName(obj.objectTypeField), obj);
   }
 
-  fillPreloadedRows(table: NamedObjectInfo, oldRows: any[], newRows: any[], key: string[], insertOnly: string[]) {
+  setTableOption(table: TableInfo, optionName: string, optionValue: string) {
+    const options = this?.dialect?.getTableFormOptions?.('sqlAlterTable');
+    const option = options?.find(x => x.name == optionName && !x.disabled);
+    if (!option) {
+      return;
+    }
+
+    this.setTableOptionCore(table, optionName, optionValue, option.sqlFormatString);
+
+    this.endCommand();
+  }
+
+  setTableOptionCore(table: TableInfo, optionName: string, optionValue: string, formatString: string) {
+    this.put('^alter ^table %f ', table);
+    this.put(formatString, optionValue);
+  }
+
+  fillNewNotNullDefaults(col: ColumnInfo) {
+    if (col.notNull && col.defaultValue != null) {
+      this.putCmd('^update %f ^set %i = %s ^where %i ^is ^null', col, col.columnName, col.defaultValue, col.columnName);
+    }
+  }
+
+  fillPreloadedRows(
+    table: NamedObjectInfo,
+    oldRows: any[],
+    newRows: any[],
+    key: string[],
+    insertOnly: string[],
+    autoIncrementColumn: string
+  ) {
     let was = false;
     for (const row of newRows) {
       const old = oldRows?.find(r => key.every(col => r[col] == row[col]));
-      const rowKeys = _.keys(row);
+      const rowKeys = _keys(row);
       if (old) {
         const updated = [];
         for (const col of rowKeys) {
@@ -636,16 +795,30 @@ export class SqlDumper implements AlterProcessor {
       } else {
         if (was) this.put(';\n');
         was = true;
+        const autoinc = rowKeys.includes(autoIncrementColumn);
+        if (autoinc) this.allowIdentityInsert(table, true);
         this.put(
           '^insert ^into %f (%,i) ^values (%,v)',
           table,
           rowKeys,
           rowKeys.map(x => row[x])
         );
+        if (autoinc) this.allowIdentityInsert(table, false);
       }
     }
     if (was) {
       this.endCommand();
     }
+  }
+
+  callableTemplate(func: CallableObjectInfo) {
+    this.put('^call %f(&>&n', func);
+
+    this.putCollection(',&n', func.parameters || [], param => {
+      this.putRaw(param.parameterMode == 'IN' ? ':' + param.parameterName : param.parameterName);
+    });
+
+    this.put('&<&n)');
+    this.endCommand();
   }
 }

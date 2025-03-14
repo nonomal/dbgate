@@ -1,12 +1,19 @@
 import { ScriptWriter, ScriptWriterJson } from 'dbgate-tools';
 import getElectron from './getElectron';
-import { showSnackbar, showSnackbarInfo, showSnackbarError, closeSnackbar } from '../utility/snackbar';
-import resolveApi from './resolveApi';
+import {
+  showSnackbar,
+  showSnackbarInfo,
+  showSnackbarError,
+  closeSnackbar,
+  updateSnackbarProgressMessage,
+} from '../utility/snackbar';
+import resolveApi, { resolveApiHeaders } from './resolveApi';
 import { apiCall, apiOff, apiOn } from './api';
 import { normalizeExportColumnMap } from '../impexp/createImpExpScript';
 import { getCurrentConfig } from '../stores';
 import { showModal } from '../modals/modalTools';
 import RunScriptModal from '../modals/RunScriptModal.svelte';
+import { QuickExportDefinition } from 'dbgate-types';
 
 export async function importSqlDump(inputFile, connection) {
   const script = getCurrentConfig().allowShellScripting ? new ScriptWriter() : new ScriptWriterJson();
@@ -41,7 +48,7 @@ export async function exportSqlDump(outputFile, connection, databaseName, pureFi
     onOpenResult:
       pureFileName && !getElectron()
         ? () => {
-            window.open(`${resolveApi()}/uploads/get?file=${pureFileName}`, '_blank');
+            downloadFromApi(`uploads/get?file=${pureFileName}`, 'file.sql');
           }
         : null,
     openResultLabel: 'Download SQL file',
@@ -69,9 +76,17 @@ async function runImportExportScript({ script, runningMessage, canceledMessage, 
     ],
   });
 
+  function handleRunnerProgress(data) {
+    const rows = data.writtenRowsCount || data.readRowCount;
+    if (rows) {
+      updateSnackbarProgressMessage(snackId, `${rows} rows processed`);
+    }
+  }
+
   function handleRunnerDone() {
     closeSnackbar(snackId);
     apiOff(`runner-done-${runid}`, handleRunnerDone);
+    apiOff(`runner-progress-${runid}`, handleRunnerProgress);
     if (isCanceled) {
       showSnackbarError(canceledMessage);
     } else {
@@ -81,6 +96,7 @@ async function runImportExportScript({ script, runningMessage, canceledMessage, 
   }
 
   apiOn(`runner-done-${runid}`, handleRunnerDone);
+  apiOn(`runner-progress-${runid}`, handleRunnerProgress);
 }
 
 export async function saveExportedFile(filters, defaultPath, extension, dataName, getScript: (filaPath: string) => {}) {
@@ -111,62 +127,60 @@ export async function saveExportedFile(filters, defaultPath, extension, dataName
     finishedMessage: `Export ${dataName} finished`,
     afterFinish: () => {
       if (!electron) {
-        window.open(`${resolveApi()}/uploads/get?file=${pureFileName}`, '_blank');
+        downloadFromApi(`uploads/get?file=${pureFileName}`, defaultPath);
       }
     },
   });
 }
 
-export async function exportQuickExportFile(dataName, reader, format, columnMap = null) {
-  await saveExportedFile(
-    [{ name: format.label, extensions: [format.extension] }],
-    `${dataName}.${format.extension}`,
-    format.extension,
-    dataName,
-    filePath => {
-      const script = getCurrentConfig().allowShellScripting ? new ScriptWriter() : new ScriptWriterJson();
+function generateQuickExportScript(
+  reader,
+  format: QuickExportDefinition,
+  filePath: string,
+  dataName: string,
+  columnMap
+) {
+  const script = getCurrentConfig().allowShellScripting ? new ScriptWriter() : new ScriptWriterJson();
 
-      const sourceVar = script.allocVariable();
-      script.assign(sourceVar, reader.functionName, reader.props);
+  const sourceVar = script.allocVariable();
+  script.assign(sourceVar, reader.functionName, reader.props);
 
-      const targetVar = script.allocVariable();
-      const writer = format.createWriter(filePath, dataName);
-      script.assign(targetVar, writer.functionName, writer.props);
+  const targetVar = script.allocVariable();
+  const writer = format.createWriter(filePath, dataName);
+  script.assign(targetVar, writer.functionName, writer.props);
 
-      const colmap = normalizeExportColumnMap(columnMap);
-      let colmapVar = null;
-      if (colmap) {
-        colmapVar = script.allocVariable();
-        script.assignValue(colmapVar, colmap);
-      }
+  const colmap = normalizeExportColumnMap(columnMap);
+  let colmapVar = null;
+  if (colmap) {
+    colmapVar = script.allocVariable();
+    script.assignValue(colmapVar, colmap);
+  }
 
-      script.copyStream(sourceVar, targetVar, colmapVar);
-      script.endLine();
+  script.copyStream(sourceVar, targetVar, colmapVar, 'data');
+  script.endLine();
 
-      return script.getScript();
-    }
-  );
+  return script.getScript();
 }
 
-// export async function exportSqlDump(connection, databaseName) {
-//   await saveExportedFile(
-//     [{ name: 'SQL files', extensions: ['sql'] }],
-//     `${databaseName}.sql`,
-//     'sql',
-//     `${databaseName}-dump`,
-//     filePath => {
-//       const script = getCurrentConfig().allowShellScripting ? new ScriptWriter() : new ScriptWriterJson();
-
-//       script.dumpDatabase({
-//         connection,
-//         databaseName,
-//         outputFile: filePath,
-//       });
-
-//       return script.getScript();
-//     }
-//   );
-// }
+export async function exportQuickExportFile(dataName, reader, format: QuickExportDefinition, columnMap = null) {
+  if (format.noFilenameDependency) {
+    const script = generateQuickExportScript(reader, format, null, dataName, columnMap);
+    runImportExportScript({
+      script,
+      runningMessage: `Exporting ${dataName}`,
+      canceledMessage: `Export ${dataName} canceled`,
+      finishedMessage: `Export ${dataName} finished`,
+    });
+  } else {
+    await saveExportedFile(
+      [{ name: format.label, extensions: [format.extension] }],
+      `${dataName}.${format.extension}`,
+      format.extension,
+      dataName,
+      filePath => generateQuickExportScript(reader, format, filePath, dataName, columnMap)
+    );
+  }
+}
 
 export async function saveFileToDisk(
   filePathFunc,
@@ -188,16 +202,26 @@ export async function saveFileToDisk(
   } else {
     const resp = await apiCall('files/generate-uploads-file');
     await filePathFunc(resp.filePath);
-    window.open(`${resolveApi()}/uploads/get?file=${resp.fileName}`, '_blank');
+    await downloadFromApi(`uploads/get?file=${resp.fileName}`, `file.${formatExtension}`);
   }
 }
 
-export function openWebLink(href) {
-  const electron = getElectron();
-
-  if (electron) {
-    electron.send('open-link', href);
-  } else {
-    window.open(href, '_blank');
-  }
+export async function downloadFromApi(route: string, donloadName: string) {
+  fetch(`${resolveApi()}/${route}`, {
+    method: 'GET',
+    headers: resolveApiHeaders(),
+  })
+    .then(res => res.blob())
+    .then(blob => {
+      const objUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      document.body.appendChild(a);
+      a.download = donloadName;
+      a.href = objUrl;
+      a.click();
+      a.remove();
+      setTimeout(() => {
+        URL.revokeObjectURL(objUrl);
+      });
+    });
 }

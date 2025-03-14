@@ -28,7 +28,10 @@ docker/plugins
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-app/src/nativeModulesContent.js
-packages/api/src/nativeModulesContent.js
 packages/api/src/packagedPluginsContent.js
 .VSCodeCounter
+
+packages/web/public/*.html
+e2e-tests/screenshots/*.png
+my_guitar_shop.db
+.aider*

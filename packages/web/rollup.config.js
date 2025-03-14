@@ -8,6 +8,7 @@ import sveltePreprocess from 'svelte-preprocess';
 import typescript from '@rollup/plugin-typescript';
 import replace from '@rollup/plugin-replace';
 import css from 'rollup-plugin-css-only';
+import json from '@rollup/plugin-json';
 
 const production = !process.env.ROLLUP_WATCH;
 
@@ -45,7 +46,7 @@ export default [
       resolve({
         browser: true,
       }),
-      
+
       // If we're building for production (npm run build
       // instead of npm run dev), minify
       production && terser(),
@@ -88,6 +89,20 @@ export default [
           // enable run-time checks when not in production
           dev: !production,
         },
+        onwarn: (warning, handler) => {
+          const ignoreWarnings = [
+            'a11y-click-events-have-key-events',
+            'a11y-missing-attribute',
+            'a11y-invalid-attribute',
+            'a11y-no-noninteractive-tabindex',
+            'a11y-label-has-associated-control',
+            'vite-plugin-svelte-css-no-scopable-elements',
+            'unused-export-let',
+          ];
+          if (ignoreWarnings.includes(warning.code)) return;
+          // console.log('***************************', warning.code);
+          handler(warning);
+        },
       }),
       // we'll extract any component CSS out into
       // a separate file - better for performance
@@ -107,6 +122,7 @@ export default [
         sourceMap: !production,
         inlineSources: !production,
       }),
+      json(),
 
       // In dev mode, call `npm run start` once
       // the bundle has been generated

@@ -19,16 +19,21 @@
   $: useSshTunnel = $values.useSshTunnel;
   $: platformInfo = usePlatformInfo();
 
-  $: {
-    if (!$values.sshMode) setFieldValue('sshMode', 'userPassword');
-    // if (!$values.sshPort) setFieldValue('sshPort', '22');
-    if (!$values.sshKeyfile && $platformInfo) setFieldValue('sshKeyfile', $platformInfo.defaultKeyfile);
-  }
+  // $: {
+  //   if (!$values.sshMode) setFieldValue('sshMode', 'userPassword');
+  //   // if (!$values.sshPort) setFieldValue('sshPort', '22');
+  //   if (!$values.sshKeyfile && $platformInfo) setFieldValue('sshKeyfile', $platformInfo.defaultKeyfile);
+  // }
 
   $: isConnected = $openedConnections.includes($values._id) || $openedSingleDatabaseConnections.includes($values._id);
 </script>
 
-<FormCheckboxField label="Use SSH tunnel" name="useSshTunnel" disabled={isConnected} />
+<FormCheckboxField
+  label="Use SSH tunnel"
+  name="useSshTunnel"
+  disabled={isConnected}
+  data-testid="ConnectionSshTunnelFields_useSshTunnel"
+/>
 
 <div class="row">
   <div class="col-9 mr-1">
@@ -37,6 +42,7 @@
       name="sshHost"
       disabled={isConnected || !useSshTunnel}
       templateProps={{ noMargin: true }}
+      data-testid="ConnectionSshTunnelFields_sshHost"
     />
   </div>
   <div class="col-3">
@@ -46,6 +52,7 @@
       disabled={isConnected || !useSshTunnel}
       templateProps={{ noMargin: true }}
       placeholder="22"
+      data-testid="ConnectionSshTunnelFields_sshPort"
     />
   </div>
 </div>
@@ -55,19 +62,26 @@
   label="SSH Authentication"
   name="sshMode"
   isNative
+  defaultSelectValue="userPassword"
   disabled={isConnected || !useSshTunnel}
   options={[
     { value: 'userPassword', label: 'Username & password' },
     { value: 'agent', label: 'SSH agent' },
-    electron && { value: 'keyFile', label: 'Key file' },
+    { value: 'keyFile', label: 'Key file' },
   ]}
+  data-testid="ConnectionSshTunnelFields_sshMode"
 />
 
-{#if $values.sshMode != 'userPassword'}
-  <FormTextField label="Login" name="sshLogin" disabled={isConnected || !useSshTunnel} />
+{#if ($values.sshMode || 'userPassword') != 'userPassword'}
+  <FormTextField
+    label="Login"
+    name="sshLogin"
+    disabled={isConnected || !useSshTunnel}
+    data-testid="ConnectionSshTunnelFields_sshLogin"
+  />
 {/if}
 
-{#if $values.sshMode == 'userPassword'}
+{#if ($values.sshMode || 'userPassword') == 'userPassword'}
   <div class="row">
     <div class="col-6 mr-1">
       <FormTextField
@@ -75,6 +89,7 @@
         name="sshLogin"
         disabled={isConnected || !useSshTunnel}
         templateProps={{ noMargin: true }}
+        data-testid="ConnectionSshTunnelFields_sshLogin"
       />
     </div>
     <div class="col-6">
@@ -83,6 +98,7 @@
         name="sshPassword"
         disabled={isConnected || !useSshTunnel}
         templateProps={{ noMargin: true }}
+        data-testid="ConnectionSshTunnelFields_sshPassword"
       />
     </div>
   </div>
@@ -91,12 +107,25 @@
 {#if $values.sshMode == 'keyFile'}
   <div class="row">
     <div class="col-6 mr-1">
-      <FormElectronFileSelector
-        label="Private key file"
-        name="sshKeyfile"
-        disabled={isConnected || !useSshTunnel}
-        templateProps={{ noMargin: true }}
-      />
+      {#if electron}
+        <FormElectronFileSelector
+          label="Private key file"
+          name="sshKeyfile"
+          disabled={isConnected || !useSshTunnel}
+          templateProps={{ noMargin: true }}
+          defaultFileName={$platformInfo?.defaultKeyfile}
+          data-testid="ConnectionSshTunnelFields_sshKeyfile"
+        />
+      {:else}
+        <FormTextField
+          label="Private key file (path on server)"
+          name="sshKeyfile"
+          disabled={isConnected || !useSshTunnel}
+          templateProps={{ noMargin: true }}
+          placeholder={$platformInfo?.defaultKeyfile}
+          data-testid="ConnectionSshTunnelFields_sshKeyfile"
+        />
+      {/if}
     </div>
     <div class="col-6">
       <FormPasswordField
@@ -104,6 +133,7 @@
         name="sshKeyfilePassword"
         disabled={isConnected || !useSshTunnel}
         templateProps={{ noMargin: true }}
+        data-testid="ConnectionSshTunnelFields_sshKeyfilePassword"
       />
     </div>
   </div>

@@ -14,14 +14,15 @@
   import { findFileFormat, getFileFormatDirections } from '../plugins/fileformats';
   import SqlEditor from '../query/SqlEditor.svelte';
   import { currentArchive, currentDatabase, extensions } from '../stores';
-  import { useArchiveFiles, useConnectionInfo, useDatabaseInfo } from '../utility/metadataLoaders';
+  import { useConnectionInfo } from '../utility/metadataLoaders';
   import FilesInput from './FilesInput.svelte';
   import FormConnectionSelect from './FormConnectionSelect.svelte';
   import FormDatabaseSelect from './FormDatabaseSelect.svelte';
   import FormSchemaSelect from './FormSchemaSelect.svelte';
   import FormTablesSelect from './FormTablesSelect.svelte';
   import { findEngineDriver } from 'dbgate-tools';
-import AceEditor from '../query/AceEditor.svelte';
+  import AceEditor from '../query/AceEditor.svelte';
+  import { _t } from '../translations';
 
   export let direction;
   export let storageTypeField;
@@ -40,19 +41,25 @@ import AceEditor from '../query/AceEditor.svelte';
     $values[storageTypeField] == 'jsldata'
       ? [{ value: 'jsldata', label: 'Query result data', directions: ['source'] }]
       : [
-          { value: 'database', label: 'Database', directions: ['source', 'target'] },
+          {
+            value: 'database',
+            label: _t('common.database', { defaultMessage: 'Database' }),
+            directions: ['source', 'target'],
+          },
           ...$extensions.fileFormats.map(format => ({
             value: format.storageType,
             label: `${format.name} files(s)`,
             directions: getFileFormatDirections(format),
           })),
-          { value: 'query', label: 'Query', directions: ['source'] },
-          { value: 'archive', label: 'Archive', directions: ['source', 'target'] },
+          { value: 'query', label: _t('common.query', { defaultMessage: 'Query' }), directions: ['source'] },
+          {
+            value: 'archive',
+            label: _t('common.archive', { defaultMessage: 'Archive' }),
+            directions: ['source', 'target'],
+          },
         ];
 
   $: storageType = $values[storageTypeField];
-  $: dbinfo = useDatabaseInfo({ conid: $values[connectionIdField], database: $values[databaseNameField] });
-  $: archiveFiles = useArchiveFiles({ folder: $values[archiveFolderField] });
   $: format = findFileFormat($extensions, storageType);
   $: connectionInfo = useConnectionInfo({ conid: $values[connectionIdField] });
   $: driver = findEngineDriver($connectionInfo, $extensions);
@@ -86,6 +93,9 @@ import AceEditor from '../query/AceEditor.svelte';
     {/if}
     <FormStyledButton
       value="Current archive"
+      data-testid={direction == 'source'
+        ? 'SourceTargetConfig_buttonCurrentArchive_source'
+        : 'SourceTargetConfig_buttonCurrentArchive_target'}
       on:click={() => {
         values.update(x => ({
           ...x,
@@ -123,7 +133,7 @@ import AceEditor from '../query/AceEditor.svelte';
       conidName={connectionIdField}
       databaseName={databaseNameField}
       name={schemaNameField}
-      label="Schema"
+      label={_t('common.schema', { defaultMessage: 'Schema' })}
     />
     {#if tablesField}
       <FormTablesSelect
@@ -131,25 +141,17 @@ import AceEditor from '../query/AceEditor.svelte';
         schemaName={schemaNameField}
         databaseName={databaseNameField}
         name={tablesField}
-        label="Tables / views / collections"
+        label={_t('importExport.tablesViewsCollections', { defaultMessage: 'Tables / views / collections' })}
       />
     {/if}
   {/if}
   {#if storageType == 'query'}
-    <div class="label">Query</div>
+    <div class="label">{_t('common.query', { defaultMessage: 'Query' })}</div>
     <div class="sqlwrap">
       {#if $values.sourceQueryType == 'json'}
-        <AceEditor
-          value={$values.sourceQuery}
-          on:input={e => setFieldValue('sourceQuery', e.detail)}
-          mode="json"
-        />
+        <AceEditor value={$values.sourceQuery} on:input={e => setFieldValue('sourceQuery', e.detail)} mode="json" />
       {:else}
-        <SqlEditor
-          value={$values.sourceQuery}
-          on:input={e => setFieldValue('sourceQuery', e.detail)}
-          {engine}
-        />
+        <SqlEditor value={$values.sourceQuery} on:input={e => setFieldValue('sourceQuery', e.detail)} {engine} />
       {/if}
     </div>
   {/if}
@@ -163,7 +165,11 @@ import AceEditor from '../query/AceEditor.svelte';
   {/if}
 
   {#if storageType == 'archive' && direction == 'source'}
-    <FormArchiveFilesSelect label="Source files" folderName={$values[archiveFolderField]} name={tablesField} />
+    <FormArchiveFilesSelect
+      label={_t('importExport.sourceFiles', { defaultMessage: 'Source files' })}
+      folderName={$values[archiveFolderField]}
+      name={tablesField}
+    />
   {/if}
 
   {#if format && direction == 'source'}
@@ -199,10 +205,12 @@ import AceEditor from '../query/AceEditor.svelte';
 
   .sqlwrap {
     position: relative;
+    z-index: 0;
     height: 100px;
     width: 20vw;
     margin-left: var(--dim-large-form-margin);
     margin-bottom: var(--dim-large-form-margin);
+    border: 1px solid var(--theme-border);
   }
 
   .label {
